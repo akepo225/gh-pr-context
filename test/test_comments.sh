@@ -2,14 +2,24 @@
 
 ORIGINAL_PATH="$HOME/bin:$PATH"
 
+KNOWN_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+UNKNOWN_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+MOCK_HEAD_TS="2025-06-01T10:00:00Z"
+MOCK_SHA_TS="2025-06-15T12:00:00Z"
+MOCK_HEAD_EPOCH="1748772000"
+MOCK_SHA_EPOCH="1749988800"
+
 setup_mocks() {
   mock_dir=$(mktemp -d)
-  cat > "$mock_dir/git" << 'GIT_EOF'
+  cat > "$mock_dir/git" << GIT_EOF
 #!/usr/bin/env bash
-case "$*" in
+case "\$*" in
   "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
   "branch --show-current") echo "feature-branch" ;;
   "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+  "log -1 --format=%ct HEAD") echo "$MOCK_HEAD_EPOCH" ;;
+  "log -1 --format=%ct $KNOWN_SHA") echo "$MOCK_SHA_EPOCH" ;;
+  "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
   *) exit 1 ;;
 esac
 GIT_EOF
@@ -105,6 +115,16 @@ test_names+=(
   test_comments_issue_stays_flat
   test_comments_replies_sorted_under_parent
   test_comments_reply_in_main_response_not_duplicated
+  test_since_last_commit_filters_old
+  test_since_date_filters_old
+  test_since_datetime_filters_old
+  test_since_sha_filters_old
+  test_since_no_filter_returns_all
+  test_since_all_overrides_since
+  test_since_last_commit_includes_equal
+  test_since_filters_replies_too
+  test_since_unknown_sha_exits_nonzero
+  test_since_unknown_sha_stderr_message
 )
 
 test_comments_empty_pr_no_output() {
@@ -338,5 +358,163 @@ test_comments_reply_in_main_response_not_duplicated() {
   else
     fail=$((fail + 1))
     echo "FAIL: reply should appear exactly once, got $reply_count occurrences (output: $output)"
+  fi
+}
+
+test_since_last_commit_filters_old() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-05-01T09:00:00Z","path":"a.sh","line":1,"body":"old comment"},{"user":{"login":"bob"},"created_at":"2025-07-01T10:00:00Z","path":"b.sh","line":2,"body":"new comment"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"exact match"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --since last-commit 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol" \
+    && ! echo "$output" | grep -qF "alice"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since last-commit should filter old comments (output: $output)"
+  fi
+}
+
+test_since_date_filters_old() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-05-15T23:59:59Z","path":"a.sh","line":1,"body":"before date"},{"user":{"login":"bob"},"created_at":"2025-06-01T00:00:00Z","path":"b.sh","line":2,"body":"on date"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-15T12:00:00Z","body":"after date"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --since 2025-06-01 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol" \
+    && ! echo "$output" | grep -qF "alice"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since 2025-06-01 should filter comments before that date (output: $output)"
+  fi
+}
+
+test_since_datetime_filters_old() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-06-01T09:59:59Z","path":"a.sh","line":1,"body":"before datetime"},{"user":{"login":"bob"},"created_at":"2025-06-01T10:00:00Z","path":"b.sh","line":2,"body":"exact datetime"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T12:00:00Z","body":"after datetime"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --since 2025-06-01T10:00:00 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol" \
+    && ! echo "$output" | grep -qF "alice"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since 2025-06-01T10:00:00 should filter comments before that datetime (output: $output)"
+  fi
+}
+
+test_since_sha_filters_old() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-06-10T09:00:00Z","path":"a.sh","line":1,"body":"before sha"},{"user":{"login":"bob"},"created_at":"2025-06-20T10:00:00Z","path":"b.sh","line":2,"body":"after sha"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-15T12:00:00Z","body":"exact sha ts"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --since "$KNOWN_SHA" 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol" \
+    && ! echo "$output" | grep -qF "alice"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <SHA> should filter comments before SHA timestamp (output: $output)"
+  fi
+}
+
+test_since_no_filter_returns_all() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"old"},{"user":{"login":"bob"},"created_at":"2025-12-01T10:00:00Z","path":"b.sh","line":2,"body":"new"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"mid"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "alice" \
+    && echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: without --since all comments should be returned (output: $output)"
+  fi
+}
+
+test_since_all_overrides_since() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"old"},{"user":{"login":"bob"},"created_at":"2025-12-01T10:00:00Z","path":"b.sh","line":2,"body":"new"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"mid"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --all --since 2025-12-01T00:00:00 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "alice" \
+    && echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --all should override --since and return all comments (output: $output)"
+  fi
+}
+
+test_since_last_commit_includes_equal() {
+  local issue_json="[{\"user\":{\"login\":\"alice\"},\"created_at\":\"$MOCK_HEAD_TS\",\"body\":\"exactly at HEAD ts\"}]"
+  setup_mocks_with_pr '[]' "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --since last-commit 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "alice"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since should include comments at exact timestamp (output: $output)"
+  fi
+}
+
+test_since_filters_replies_too() {
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-07-01T10:00:00Z","path":"a.sh","line":1,"body":"new parent"}]'
+  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-05-01T10:00:00Z","body":"old reply"},{"user":{"login":"carol"},"created_at":"2025-08-01T10:00:00Z","body":"new reply"}]'
+  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local output
+  output=$(run_script comments --pr 42 --since 2025-06-01T00:00:00 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "carol" \
+    && ! echo "$output" | grep -qF "old reply"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since should filter replies too (output: $output)"
+  fi
+}
+
+test_since_unknown_sha_exits_nonzero() {
+  setup_mocks_with_pr '[]' '[]'
+  local exit_code=0
+  run_script comments --pr 42 --since "$UNKNOWN_SHA" >/dev/null 2>&1 || exit_code=$?
+  cleanup_mocks
+  if [ "$exit_code" -ne 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since with unknown SHA should exit non-zero"
+  fi
+}
+
+test_since_unknown_sha_stderr_message() {
+  setup_mocks_with_pr '[]' '[]'
+  local output
+  output=$(run_script comments --pr 42 --since "$UNKNOWN_SHA" 2>&1) || true
+  cleanup_mocks
+  if echo "$output" | grep -qF "unknown commit"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since with unknown SHA should mention unknown commit (output: $output)"
   fi
 }
