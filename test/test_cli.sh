@@ -68,8 +68,14 @@ test_since_malformed_sha_stderr_message() {
 
 test_since_invalid_calendar_date_exits_nonzero() {
   assert_exit 1 "--since with impossible date exits non-zero" bash "$script" comments --since "2025-13-40"
+  assert_exit 1 "--since with invalid month exits non-zero" bash "$script" comments --since "2025-13-01"
+  assert_exit 1 "--since with invalid day exits non-zero" bash "$script" comments --since "2023-02-30"
+  assert_exit 1 "--since with invalid hour exits non-zero" bash "$script" comments --since "2023-01-01T25:00:00"
 }
 
 test_since_invalid_calendar_date_stderr_message() {
   assert_stderr_contains "--since impossible date gives clear message" "invalid --since value" bash "$script" comments --since "2025-13-40"
+  assert_stderr_contains "--since invalid month gives clear message" "invalid --since value" bash "$script" comments --since "2025-13-01"
+  assert_stderr_contains "--since invalid day gives clear message" "invalid --since value" bash "$script" comments --since "2023-02-30"
+  assert_stderr_contains "--since invalid hour gives clear message" "invalid --since value" bash "$script" comments --since "2023-01-01T25:00:00"
 }
