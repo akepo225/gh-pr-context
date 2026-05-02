@@ -13,6 +13,8 @@ test_names+=(
   test_since_invalid_format_stderr_message
   test_since_malformed_sha_exits_nonzero
   test_since_malformed_sha_stderr_message
+  test_since_invalid_calendar_date_exits_nonzero
+  test_since_invalid_calendar_date_stderr_message
 )
 
 test_no_args_exits_nonzero() {
@@ -62,4 +64,12 @@ test_since_malformed_sha_exits_nonzero() {
 
 test_since_malformed_sha_stderr_message() {
   assert_stderr_contains "--since short SHA gives clear message" "invalid --since value" bash "$script" comments --since "abc123"
+}
+
+test_since_invalid_calendar_date_exits_nonzero() {
+  assert_exit 1 "--since with impossible date exits non-zero" bash "$script" comments --since "2025-13-40"
+}
+
+test_since_invalid_calendar_date_stderr_message() {
+  assert_stderr_contains "--since impossible date gives clear message" "invalid --since value" bash "$script" comments --since "2025-13-40"
 }

@@ -6,6 +6,8 @@ KNOWN_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 UNKNOWN_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 MOCK_HEAD_TS="2025-06-01T10:00:00Z"
 MOCK_SHA_TS="2025-06-15T12:00:00Z"
+MOCK_HEAD_EPOCH="1748772000"
+MOCK_SHA_EPOCH="1749988800"
 
 setup_mocks() {
   mock_dir=$(mktemp -d)
@@ -15,9 +17,9 @@ case "\$*" in
   "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
   "branch --show-current") echo "feature-branch" ;;
   "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-  "log -1 --format=%cI HEAD") echo "$MOCK_HEAD_TS" ;;
-  "log -1 --format=%cI $KNOWN_SHA") echo "$MOCK_SHA_TS" ;;
-  "log -1 --format=%cI $UNKNOWN_SHA") exit 1 ;;
+  "log -1 --format=%ct HEAD") echo "$MOCK_HEAD_EPOCH" ;;
+  "log -1 --format=%ct $KNOWN_SHA") echo "$MOCK_SHA_EPOCH" ;;
+  "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
   *) exit 1 ;;
 esac
 GIT_EOF
