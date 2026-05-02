@@ -90,7 +90,29 @@ cmd_comments() {
   local review_json
   review_json=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate) \
     || die "failed to fetch review comments for PR #$pr_number"
-  review_json=$(echo "$review_json" | jq '[.[] | {source: "review-comment", author: .user.login, created: .created_at, path: .path, line: (.line // 0), body: .body}]')
+  review_json=$(echo "$review_json" | jq '[.[] | select(.in_reply_to_id == null) | {source: "review-comment", id: .id, author: .user.login, created: .created_at, path: .path, line: (.line // 0), body: .body}]')
+
+  local review_ids
+  review_ids=$(echo "$review_json" | jq -r '.[].id // empty')
+
+  local replies_map="{}"
+  for cid in $review_ids; do
+    local replies_raw
+    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate) \
+      || die "failed to fetch replies for comment $cid"
+    if [ -n "$since_ref" ]; then
+      replies_raw=$(echo "$replies_raw" | jq --arg since "$since_ref" '[.[] | select(.created_at >= $since)]')
+    fi
+    local reply_fields
+    reply_fields=$(echo "$replies_raw" | jq '[.[] | {author: .user.login, created: .created_at, body: .body}] | sort_by(.created)')
+    replies_map=$(echo "$replies_map" | jq --arg cid "$cid" --argjson replies "$reply_fields" '. + {($cid): $replies}')
+  done
+
+  if [ "$replies_map" != "{}" ]; then
+    review_json=$(echo "$review_json" | jq --argjson rmap "$replies_map" '[.[] | . + {replies: ($rmap[.id | tostring] // [])}]')
+  else
+    review_json=$(echo "$review_json" | jq '[.[] | . + {replies: []}]')
+  fi
 
   local issue_json
   issue_json=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate) \
@@ -100,7 +122,7 @@ cmd_comments() {
   local merged
   merged=$(printf '%s\n%s\n' "$review_json" "$issue_json" | jq -s 'flatten | sort_by(.created)')
 
-  echo "$merged" | jq -r '.[] | if .source == "review-comment" then "--- review-comment\nauthor: \(.author)\ncreated: \(.created)\npath: \(.path)\nline: \(.line)\nbody: \(.body)" else "--- issue-comment\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)" end'
+  echo "$merged" | jq -r '.[] | if .source == "review-comment" then "--- review-comment\nauthor: \(.author)\ncreated: \(.created)\npath: \(.path)\nline: \(.line)\nbody: \(.body)" + (if (.replies | length) > 0 then "\n" + (.replies | map(">>> reply\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)") | join("\n")) else "" end) else "--- issue-comment\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)" end'
 }
 
 cmd_status() {
