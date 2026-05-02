@@ -63,7 +63,7 @@ gh-pr-context logs
 
 Comments are returned as terse plain-text with clear delimiters. Review comment replies are nested under their parent. Example:
 
-```
+```text
 --- review-comment
 author: someone
 created: 2025-05-01T14:32:00Z
@@ -83,7 +83,7 @@ body: LGTM, just the one comment above.
 
 Status output:
 
-```
+```text
 --- check
 name: CI
 status: completed
