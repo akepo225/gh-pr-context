@@ -95,7 +95,7 @@ resolve_since_timestamp() {
 }
 
 cmd_comments() {
-  local pr_number="" since_ref="" all_comments=true
+  local pr_number="" since_ref="" force_all=false
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -107,11 +107,15 @@ cmd_comments() {
         [ $# -ge 2 ] || die "missing value for --since"
         since_ref=$(resolve_since_timestamp "$2"); shift 2
         ;;
-      --all)  all_comments=true; shift ;;
+      --all)  force_all=true; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown option: $1" ;;
     esac
   done
+
+  if [ "$force_all" = true ]; then
+    since_ref=""
+  fi
 
   check_deps
 

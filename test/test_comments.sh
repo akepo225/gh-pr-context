@@ -120,6 +120,7 @@ test_names+=(
   test_since_datetime_filters_old
   test_since_sha_filters_old
   test_since_no_filter_returns_all
+  test_since_all_overrides_since
   test_since_last_commit_includes_equal
   test_since_filters_replies_too
   test_since_unknown_sha_exits_nonzero
@@ -442,6 +443,23 @@ test_since_no_filter_returns_all() {
   else
     fail=$((fail + 1))
     echo "FAIL: without --since all comments should be returned (output: $output)"
+  fi
+}
+
+test_since_all_overrides_since() {
+  local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"old"},{"user":{"login":"bob"},"created_at":"2025-12-01T10:00:00Z","path":"b.sh","line":2,"body":"new"}]'
+  local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"mid"}]'
+  setup_mocks_with_pr "$review_json" "$issue_json"
+  local output
+  output=$(run_script comments --pr 42 --all --since 2025-12-01T00:00:00 2>&1)
+  cleanup_mocks
+  if echo "$output" | grep -qF "alice" \
+    && echo "$output" | grep -qF "bob" \
+    && echo "$output" | grep -qF "carol"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --all should override --since and return all comments (output: $output)"
   fi
 }
 
