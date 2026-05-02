@@ -98,7 +98,8 @@ cmd_comments() {
   local replies_map="{}"
   for cid in $review_ids; do
     local replies_raw
-    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate 2>/dev/null) || replies_raw='[]'
+    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate) \
+      || die "failed to fetch replies for comment $cid"
     if [ -n "$since_ref" ]; then
       replies_raw=$(echo "$replies_raw" | jq --arg since "$since_ref" '[.[] | select(.created_at >= $since)]')
     fi

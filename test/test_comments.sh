@@ -104,6 +104,7 @@ test_names+=(
   test_comments_mixed_replies
   test_comments_issue_stays_flat
   test_comments_replies_sorted_under_parent
+  test_comments_reply_in_main_response_not_duplicated
 )
 
 test_comments_empty_pr_no_output() {
@@ -320,5 +321,22 @@ test_comments_replies_sorted_under_parent() {
   else
     fail=$((fail + 1))
     echo "FAIL: replies should be sorted by created_at, expected bob first, got: $first_reply_author (output: $output)"
+  fi
+}
+
+test_comments_reply_in_main_response_not_duplicated() {
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":102,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"inline reply"}]'
+  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"inline reply"}]'
+  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local output
+  output=$(run_script comments --pr 42 2>&1)
+  cleanup_mocks
+  local reply_count
+  reply_count=$(echo "$output" | grep -cF ">>> reply" || true)
+  if [ "$reply_count" -eq 1 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: reply should appear exactly once, got $reply_count occurrences (output: $output)"
   fi
 }
