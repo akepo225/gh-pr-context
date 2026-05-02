@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="0.1.0"
+
+die() {
+  echo "error: $1" >&2
+  exit 1
+}
+
+check_deps() {
+  for cmd in gh jq git; do
+    command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required but not found on PATH"
+  done
+}
+
+usage() {
+  echo "usage: gh-pr-context <command> [options]"
+  echo ""
+  echo "commands:"
+  echo "  comments   Fetch PR comments"
+  echo "  status     Fetch CI check status"
+  echo "  logs       Fetch logs for failed CI checks"
+  echo ""
+  echo "options:"
+  echo "  --pr <number>   PR number (auto-detected from branch if omitted)"
+  echo "  --since <ref>   Filter comments by time"
+  echo "  --all           Return all comments (default)"
+  echo "  -h, --help      Show this message"
+}
+
+resolve_owner_repo() {
+  local remote_url
+  remote_url=$(git remote get-url origin) || die "failed to get origin remote url"
+  local owner_repo
+  owner_repo=$(echo "$remote_url" | sed -E 's|.*github\.com[:/]||; s|\.git$||') || die "failed to parse owner/repo from remote url"
+  echo "$owner_repo"
+}
+
+resolve_pr_number() {
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD) || die "failed to determine current branch"
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+  local owner=${owner_repo%%/*}
+  local repo=${owner_repo#*/}
+  local pr_data
+  pr_data=$(gh api "repos/$owner/$repo/pulls?head=$owner:$branch" --jq '.[0].number') || die "failed to look up PR for branch '$branch'"
+  if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
+    die "no open PR found for branch '$branch'"
+  fi
+  echo "$pr_data"
+}
+
+resolve_pr_head_sha() {
+  local pr_number=$1
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+  gh api "repos/$owner_repo/pulls/$pr_number" --jq '.head.sha'
+}
+
+cmd_comments() {
+  local pr_number="" since_ref="" all_comments=true
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      --since)
+        [ $# -ge 2 ] || die "missing value for --since"
+        die "--since is not yet implemented"
+        ;;
+      --all)  all_comments=true; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  check_deps
+
+  if [ -z "$pr_number" ]; then
+    pr_number=$(resolve_pr_number)
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local review_json
+  review_json=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate) \
+    || die "failed to fetch review comments for PR #$pr_number"
+  review_json=$(echo "$review_json" | jq '[.[] | {source: "review-comment", author: .user.login, created: .created_at, path: .path, line: (.line // 0), body: .body}]')
+
+  local issue_json
+  issue_json=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate) \
+    || die "failed to fetch issue comments for PR #$pr_number"
+  issue_json=$(echo "$issue_json" | jq '[.[] | {source: "issue-comment", author: .user.login, created: .created_at, body: .body}]')
+
+  local merged
+  merged=$(printf '%s\n%s\n' "$review_json" "$issue_json" | jq -s 'flatten | sort_by(.created)')
+
+  echo "$merged" | jq -r '.[] | if .source == "review-comment" then "--- review-comment\nauthor: \(.author)\ncreated: \(.created)\npath: \(.path)\nline: \(.line)\nbody: \(.body)" else "--- issue-comment\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)" end'
+}
+
+cmd_status() {
+  check_deps
+  die "status command not yet implemented"
+}
+
+cmd_logs() {
+  check_deps
+  die "logs command not yet implemented"
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+command=$1
+shift
+
+case "$command" in
+  comments) cmd_comments "$@" ;;
+  status)   cmd_status "$@" ;;
+  logs)     cmd_logs "$@" ;;
+  -h|--help) usage; exit 0 ;;
+  *) die "unknown command: $command" ;;
+esac
