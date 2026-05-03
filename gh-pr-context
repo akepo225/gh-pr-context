@@ -203,8 +203,67 @@ cmd_status() {
 }
 
 cmd_logs() {
+  local pr_number=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
   check_deps
-  die "logs command not yet implemented"
+
+  if [ -z "$pr_number" ]; then
+    pr_number=$(resolve_pr_number)
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local sha
+  sha=$(resolve_pr_head_sha "$pr_number") \
+    || die "failed to resolve head SHA for PR #$pr_number"
+
+  local checks_json
+  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
+    || die "failed to fetch check runs for SHA $sha"
+
+  local failed_pairs
+  failed_pairs=$(echo "$checks_json" | jq -s -r 'map(.check_runs) | add // [] | map(select(.status == "completed" and .conclusion == "failure")) | sort_by(.name) | .[] | "\(.id)\t\(.name)"')
+
+  if [ -z "$failed_pairs" ]; then
+    return 0
+  fi
+
+  while IFS=$'\t' read -r id name; do
+    local log_content
+    log_content=$(gh api "repos/$owner_repo/actions/jobs/$id/logs" 2>/dev/null) || log_content=""
+
+    echo "--- log"
+    echo "name: $name"
+
+    if [ -z "$log_content" ]; then
+      echo "[log not available]"
+      continue
+    fi
+
+    local total_lines
+    total_lines=$(echo "$log_content" | wc -l)
+    total_lines=${total_lines//[[:space:]]/}
+
+    if [ "$total_lines" -gt 500 ]; then
+      echo "$log_content" | head -500
+      local omitted=$((total_lines - 500))
+      echo "[truncated: $omitted lines omitted]"
+    else
+      echo "$log_content"
+    fi
+  done <<< "$failed_pairs"
 }
 
 if [ $# -eq 0 ]; then
