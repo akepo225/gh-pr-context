@@ -8,6 +8,7 @@ UNKNOWN_SHA="dddddddddddddddddddddddddddddddddddddddd"
 HEAD_EPOCH="1742040000"
 SHA_EPOCH="1751587200"
 
+# setup_mocks creates a temporary directory, writes mock `git` and `gh` executables into it (assigned to `$mock_dir`), and makes them executable for use in tests.
 setup_mocks() {
   mock_dir=$(mktemp -d)
   cat > "$mock_dir/git" << GIT_EOF
@@ -38,10 +39,12 @@ GIT_EOF
   chmod +x "$mock_dir/gh"
 }
 
+# run_script runs the target script with the mock directory prepended to PATH and forwards all arguments.
 run_script() {
   PATH="$mock_dir:$ORIGINAL_PATH" bash "$script" "$@"
 }
 
+# cleanup_mocks removes the temporary mock directory created by setup_mocks.
 cleanup_mocks() {
   rm -rf "$mock_dir"
 }
@@ -66,6 +69,7 @@ test_names+=(
   test_since_short_sha_treated_as_invalid
 )
 
+# test_since_empty_resolves_to_empty verifies that running `comments --pr 42` without a `--since` argument exits with status 0.
 test_since_empty_resolves_to_empty() {
   setup_mocks
   local exit_code=0
@@ -79,6 +83,7 @@ test_since_empty_resolves_to_empty() {
   fi
 }
 
+# test_since_last_commit_exits_zero verifies that running `comments --pr 42 --since last-commit` exits with status 0; it sets up mocks, runs the command, tears down mocks, increments `pass` on success or `fail` and prints a failure message including the exit code on error.
 test_since_last_commit_exits_zero() {
   setup_mocks
   local exit_code=0
@@ -92,6 +97,7 @@ test_since_last_commit_exits_zero() {
   fi
 }
 
+# test_since_last_commit_format_is_iso8601 verifies that `--since last-commit` is treated as an ISO-8601 timestamp, allowing comments with future `created_at` values to appear and the command to exit successfully.
 test_since_last_commit_format_is_iso8601() {
   setup_mocks
   printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
@@ -118,6 +124,7 @@ test_since_last_commit_format_is_iso8601() {
   fi
 }
 
+# test_since_known_sha_exits_zero verifies that invoking the `comments --pr 42 --since "$KNOWN_SHA"` command exits with status 0.
 test_since_known_sha_exits_zero() {
   setup_mocks
   local exit_code=0
@@ -131,6 +138,7 @@ test_since_known_sha_exits_zero() {
   fi
 }
 
+# test_since_known_sha_format_is_iso8601 verifies that using a known commit SHA with --since accepts ISO-8601 timestamps and allows comments with a matching future `created_at` to appear in the command output.
 test_since_known_sha_format_is_iso8601() {
   setup_mocks
   printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
@@ -157,6 +165,7 @@ test_since_known_sha_format_is_iso8601() {
   fi
 }
 
+# test_since_date_only_exits_zero verifies that invoking the CLI with a date-only `--since` value (YYYY-MM-DD) for PR 42 exits with status 0.
 test_since_date_only_exits_zero() {
   setup_mocks
   local exit_code=0
@@ -170,6 +179,7 @@ test_since_date_only_exits_zero() {
   fi
 }
 
+# test_since_date_only_appends_midnight_utc verifies that a date-only `--since` value is treated as midnight UTC and that comments with a `created_at` timestamp at that instant are included in the command output.
 test_since_date_only_appends_midnight_utc() {
   setup_mocks
   printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
@@ -196,6 +206,8 @@ test_since_date_only_appends_midnight_utc() {
   fi
 }
 
+# test_since_datetime_exits_zero verifies that running `comments --pr 42 --since 2025-06-15T08:30:00` exits with status 0.
+# It sets up mock `git`/`gh` binaries, runs the command capturing the exit code, updates the `pass`/`fail` counters, and cleans up mocks.
 test_since_datetime_exits_zero() {
   setup_mocks
   local exit_code=0
@@ -209,6 +221,7 @@ test_since_datetime_exits_zero() {
   fi
 }
 
+# test_since_datetime_appends_z tests that a --since datetime without a trailing `Z` is interpreted as UTC and that comments with the exact resulting timestamp are included in the command output.
 test_since_datetime_appends_z() {
   setup_mocks
   printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
@@ -235,6 +248,7 @@ test_since_datetime_appends_z() {
   fi
 }
 
+# test_since_unknown_sha_exits_nonzero verifies that running `comments --pr 42 --since <unknown SHA>` results in a non-zero exit status.
 test_since_unknown_sha_exits_nonzero() {
   setup_mocks
   local exit_code=0
@@ -248,6 +262,7 @@ test_since_unknown_sha_exits_nonzero() {
   fi
 }
 
+# test_since_unknown_sha_stderr_mentions_unknown_commit runs the comments command with `--since` set to an unknown SHA and verifies the output contains the literal substring "unknown commit".
 test_since_unknown_sha_stderr_mentions_unknown_commit() {
   setup_mocks
   local output
@@ -261,26 +276,32 @@ test_since_unknown_sha_stderr_mentions_unknown_commit() {
   fi
 }
 
+# test_since_invalid_format_exits_nonzero asserts that invoking the `comments` command with `--since` set to an arbitrary non-date string exits with a non-zero status.
 test_since_invalid_format_exits_nonzero() {
   assert_exit 1 "--since with arbitrary string exits non-zero" bash "$script" comments --pr 42 --since "not-a-date-at-all"
 }
 
+# test_since_invalid_format_stderr_message checks that providing a malformed --since value causes the command to emit "invalid --since value" to stderr.
 test_since_invalid_format_stderr_message() {
   assert_stderr_contains "--since invalid format error message" "invalid --since value" bash "$script" comments --pr 42 --since "not-a-date-at-all"
 }
 
+# test_since_invalid_month_exits_nonzero verifies that providing `--since` with an invalid month (`13`) causes the command to exit with a non-zero status.
 test_since_invalid_month_exits_nonzero() {
   assert_exit 1 "--since with month 13 exits non-zero" bash "$script" comments --pr 42 --since "2025-13-01"
 }
 
+# test_since_invalid_day_exits_nonzero asserts that invoking comments with --since "2025-01-32" exits with a non-zero status.
 test_since_invalid_day_exits_nonzero() {
   assert_exit 1 "--since with day 32 exits non-zero" bash "$script" comments --pr 42 --since "2025-01-32"
 }
 
+# test_since_invalid_hour_exits_nonzero verifies that invoking comments --pr 42 with --since "2025-01-01T25:00:00" exits with a non-zero status.
 test_since_invalid_hour_exits_nonzero() {
   assert_exit 1 "--since with hour 25 exits non-zero" bash "$script" comments --pr 42 --since "2025-01-01T25:00:00"
 }
 
+# test_since_short_sha_treated_as_invalid verifies that passing a 7-character SHA to `--since` causes the command to exit non-zero and emits "invalid --since value" on stderr.
 test_since_short_sha_treated_as_invalid() {
   assert_exit 1 "--since with 7-char sha exits non-zero" bash "$script" comments --pr 42 --since "abc1234"
   assert_stderr_contains "--since 7-char sha emits invalid error" "invalid --since value" bash "$script" comments --pr 42 --since "abc1234"

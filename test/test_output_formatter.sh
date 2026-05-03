@@ -4,6 +4,7 @@ ORIGINAL_PATH="$HOME/bin:$PATH"
 
 HEAD_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+# setup_mocks_base creates a temporary mock directory and installs a minimal git mock that returns a fixed remote URL and branch name.
 setup_mocks_base() {
   mock_dir=$(mktemp -d)
   cat > "$mock_dir/git" << 'GIT_EOF'
@@ -17,6 +18,7 @@ GIT_EOF
   chmod +x "$mock_dir/git"
 }
 
+# setup_mocks_comments creates a mock `gh` in $mock_dir (calls setup_mocks_base) that echoes the provided JSON for `pulls/42/comments` and `issues/42/comments` and returns `[]` for `pulls/comments/*/replies`; parameters: `pr_reviews` — JSON to echo for `pulls/42/comments`, `pr_issues` — JSON to echo for `issues/42/comments`.
 setup_mocks_comments() {
   local pr_reviews="$1" pr_issues="$2"
   setup_mocks_base
@@ -35,6 +37,7 @@ setup_mocks_comments() {
   chmod +x "$mock_dir/gh"
 }
 
+# setup_mocks_comments_with_reply creates a temporary mock environment, writes the provided reply JSON to replies_77.json, and installs a mock `gh` that returns the given PR review comments, empty issue comments, and serves per-comment reply JSON (by comment id) for tests.
 setup_mocks_comments_with_reply() {
   local pr_reviews="$1" reply_json="$2"
   setup_mocks_base
@@ -58,6 +61,7 @@ RMOCK
   chmod +x "$mock_dir/gh"
 }
 
+# setup_mocks_status creates a temporary mock environment and writes a mock `gh` executable that returns the fixed HEAD SHA for `pulls/42` and echoes the provided `check_runs` JSON when invoked with `check-runs`.
 setup_mocks_status() {
   local check_runs="$1"
   setup_mocks_base
@@ -73,6 +77,7 @@ setup_mocks_status() {
   chmod +x "$mock_dir/gh"
 }
 
+# setup_mocks_logs creates a temporary mock directory and an executable `gh` that returns the fixed HEAD_SHA for `pulls/42`, the provided `check_runs` JSON for check-run queries, and the given `log_content` for `logs` requests.
 setup_mocks_logs() {
   local check_runs="$1" log_content="$2"
   setup_mocks_base
@@ -91,10 +96,12 @@ setup_mocks_logs() {
   chmod +x "$mock_dir/gh"
 }
 
+# run_script runs the target script with the mock directory prepended to PATH so the mock executables override real tools.
 run_script() {
   PATH="$mock_dir:$ORIGINAL_PATH" bash "$script" "$@"
 }
 
+# cleanup_mocks removes the temporary mock directory used for test mocks.
 cleanup_mocks() {
   rm -rf "$mock_dir"
 }
@@ -120,6 +127,7 @@ test_names+=(
   test_fmt_all_passing_logs_no_output
 )
 
+# test_fmt_review_comment_delimiter verifies that formatted review comments begin with `--- review-comment` on a line by itself.
 test_fmt_review_comment_delimiter() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/app.sh","line":5,"body":"fix this"}]'
   setup_mocks_comments "$review" '[]'
@@ -134,6 +142,7 @@ test_fmt_review_comment_delimiter() {
   fi
 }
 
+# test_fmt_review_comment_field_order tests that review comment fields appear in the order author→created→path→line→body in the formatted comments output.
 test_fmt_review_comment_field_order() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/app.sh","line":5,"body":"fix this"}]'
   setup_mocks_comments "$review" '[]'
@@ -157,6 +166,7 @@ test_fmt_review_comment_field_order() {
   fi
 }
 
+# test_fmt_review_comment_no_raw_json ensures formatted review comment output contains no raw JSON-like characters (`[`, `{`) at the start of any line.
 test_fmt_review_comment_no_raw_json() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/app.sh","line":5,"body":"fix this"}]'
   setup_mocks_comments "$review" '[]'
@@ -171,6 +181,7 @@ test_fmt_review_comment_no_raw_json() {
   fi
 }
 
+# test_fmt_review_comment_no_trailing_whitespace_on_fields checks that formatted field lines (author, created, path, line, body, name, status, conclusion) do not end with trailing whitespace.
 test_fmt_review_comment_no_trailing_whitespace_on_fields() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/app.sh","line":5,"body":"fix this"}]'
   setup_mocks_comments "$review" '[]'
@@ -187,6 +198,7 @@ test_fmt_review_comment_no_trailing_whitespace_on_fields() {
   fi
 }
 
+# test_fmt_issue_comment_delimiter verifies that running `comments --pr` emits a line containing only `--- issue-comment` for issue comments.
 test_fmt_issue_comment_delimiter() {
   local issue='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"looks good"}]'
   setup_mocks_comments '[]' "$issue"
@@ -201,6 +213,7 @@ test_fmt_issue_comment_delimiter() {
   fi
 }
 
+# test_fmt_issue_comment_fields_present verifies that issue comment output contains `author`, `created`, and `body` fields.
 test_fmt_issue_comment_fields_present() {
   local issue='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"hello world"}]'
   setup_mocks_comments '[]' "$issue"
@@ -217,6 +230,7 @@ test_fmt_issue_comment_fields_present() {
   fi
 }
 
+# test_fmt_issue_comment_no_path_line ensures issue comment output contains no lines beginning with `path:` or `line:`.
 test_fmt_issue_comment_no_path_line() {
   local issue='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"hello"}]'
   setup_mocks_comments '[]' "$issue"
@@ -231,6 +245,7 @@ test_fmt_issue_comment_no_path_line() {
   fi
 }
 
+# test_fmt_issue_comment_no_raw_json verifies that issue comment output does not contain lines beginning with JSON delimiters (`[` or `{`), ensuring no raw JSON is printed.
 test_fmt_issue_comment_no_raw_json() {
   local issue='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"hi"}]'
   setup_mocks_comments '[]' "$issue"
@@ -245,6 +260,7 @@ test_fmt_issue_comment_no_raw_json() {
   fi
 }
 
+# test_fmt_reply_marker verifies that a reply is rendered using exactly the line '>>> reply' on its own line.
 test_fmt_reply_marker() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
   local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"a reply"}]'
@@ -260,6 +276,7 @@ test_fmt_reply_marker() {
   fi
 }
 
+# test_fmt_reply_fields verifies that a reply block in the formatted comments output includes `author`, `created`, and `body` fields.
 test_fmt_reply_fields() {
   local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
   local reply='[{"user":{"login":"replyauthor"},"created_at":"2025-03-15T09:00:00Z","body":"the reply body"}]'
@@ -277,6 +294,7 @@ test_fmt_reply_fields() {
   fi
 }
 
+# test_fmt_check_completed_delimiter_and_fields verifies that a completed check run produces a `--- check` delimiter and includes `name:`, `status: completed`, and `conclusion: success` in the formatter output.
 test_fmt_check_completed_delimiter_and_fields() {
   local checks='{"total_count":1,"check_runs":[{"name":"Build","status":"completed","conclusion":"success"}]}'
   setup_mocks_status "$checks"
@@ -294,6 +312,7 @@ test_fmt_check_completed_delimiter_and_fields() {
   fi
 }
 
+# test_fmt_check_non_completed_no_conclusion_field verifies that a non-completed check outputs its `status` and omits any `conclusion:` field.
 test_fmt_check_non_completed_no_conclusion_field() {
   local checks='{"total_count":1,"check_runs":[{"name":"Lint","status":"queued","conclusion":null}]}'
   setup_mocks_status "$checks"
@@ -308,6 +327,7 @@ test_fmt_check_non_completed_no_conclusion_field() {
   fi
 }
 
+# test_fmt_check_no_raw_json asserts that the `status --pr` output contains no lines beginning with raw JSON characters (`[` or `{`).
 test_fmt_check_no_raw_json() {
   local checks='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"failure"}]}'
   setup_mocks_status "$checks"
@@ -322,6 +342,7 @@ test_fmt_check_no_raw_json() {
   fi
 }
 
+# test_fmt_log_delimiter_and_name verifies that logs output includes the '--- log' delimiter and a `name:` field for a check run.
 test_fmt_log_delimiter_and_name() {
   local checks='{"total_count":1,"check_runs":[{"id":99,"name":"Test Suite","status":"completed","conclusion":"failure"}]}'
   local log="line one\nline two"
@@ -337,6 +358,7 @@ test_fmt_log_delimiter_and_name() {
   fi
 }
 
+# test_fmt_log_no_raw_json verifies that `logs --pr` header lines (`--- log` and `name:`) do not contain raw JSON-like characters such as `[` or `{`.
 test_fmt_log_no_raw_json() {
   local checks='{"total_count":1,"check_runs":[{"id":99,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log="error: build failed"
@@ -354,6 +376,7 @@ test_fmt_log_no_raw_json() {
   fi
 }
 
+# test_fmt_empty_comments_produces_no_output verifies that when PR review comments and issue comments are empty the formatter produces no output.
 test_fmt_empty_comments_produces_no_output() {
   setup_mocks_comments '[]' '[]'
   local output
@@ -367,6 +390,7 @@ test_fmt_empty_comments_produces_no_output() {
   fi
 }
 
+# test_fmt_empty_checks_produces_no_output verifies that running `status --pr` produces no output when the repository has zero check runs.
 test_fmt_empty_checks_produces_no_output() {
   local checks='{"total_count":0,"check_runs":[]}'
   setup_mocks_status "$checks"
@@ -381,6 +405,7 @@ test_fmt_empty_checks_produces_no_output() {
   fi
 }
 
+# test_fmt_all_passing_logs_no_output verifies that when all check runs conclude with success, the `logs --pr` command produces no output.
 test_fmt_all_passing_logs_no_output() {
   local checks='{"total_count":2,"check_runs":[{"id":1,"name":"A","status":"completed","conclusion":"success"},{"id":2,"name":"B","status":"completed","conclusion":"success"}]}'
   setup_mocks_logs "$checks" "should not appear"
