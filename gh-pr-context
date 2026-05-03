@@ -26,6 +26,7 @@ usage() {
   echo "  --pr <number>   PR number (auto-detected from branch if omitted)"
   echo "  --since <ref>   Filter comments by time"
   echo "  --all           Return all comments (default)"
+  echo "  --version       Show version"
   echo "  -h, --help      Show this message"
 }
 
@@ -79,14 +80,20 @@ resolve_since_timestamp() {
   fi
   if echo "$since_input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
     local ts="${since_input}T00:00:00Z"
-    echo "$ts" | jq -R -e 'fromdateiso8601' >/dev/null 2>&1 \
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
       || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
     echo "$ts"
     return
   fi
   if echo "$since_input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
     local ts="${since_input}Z"
-    echo "$ts" | jq -R -e 'fromdateiso8601' >/dev/null 2>&1 \
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
       || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
     echo "$ts"
     return
@@ -137,13 +144,21 @@ cmd_comments() {
   local replies_map="{}"
   for cid in $review_ids; do
     local replies_raw
-    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate) \
-      || die "failed to fetch replies for comment $cid"
+    if ! replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate 2>&1); then
+      if [[ "$replies_raw" == *"404"* ]]; then
+        replies_raw="[]"
+      else
+        die "failed to fetch replies for comment $cid: $replies_raw"
+      fi
+    fi
     if [ -n "$since_ref" ]; then
       replies_raw=$(echo "$replies_raw" | jq --arg since "$since_ref" '[.[] | select(.created_at >= $since)]')
     fi
     local reply_fields
     reply_fields=$(echo "$replies_raw" | jq '[.[] | {author: .user.login, created: .created_at, body: .body}] | sort_by(.created)')
+    if [ "$reply_fields" = "[]" ] || [ -z "$reply_fields" ]; then
+      continue
+    fi
     replies_map=$(echo "$replies_map" | jq --arg cid "$cid" --argjson replies "$reply_fields" '. + {($cid): $replies}')
   done
 
@@ -280,5 +295,6 @@ case "$command" in
   status)   cmd_status "$@" ;;
   logs)     cmd_logs "$@" ;;
   -h|--help) usage; exit 0 ;;
+  --version) echo "gh-pr-context $version"; exit 0 ;;
   *) die "unknown command: $command" ;;
 esac
