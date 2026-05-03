@@ -14,14 +14,14 @@ die() {
 
 install_dir="${INSTALL_DIR:-${1:-$HOME/.local/bin}}"
 
-mkdir -p "$install_dir" || die "failed to create directory: $install_dir"
+mkdir -p "$install_dir" 2>/dev/null || die "failed to create directory: $install_dir"
 
-tmp=$(mktemp) || die "failed to create temp file"
+tmp=$(mktemp 2>/dev/null) || die "failed to create temp file"
 trap 'rm -f "$tmp"' EXIT
 
-curl -fsSL "$RAW_BASE/$SCRIPT_NAME" -o "$tmp" || die "failed to download $SCRIPT_NAME"
+curl -fsSL "$RAW_BASE/$SCRIPT_NAME" -o "$tmp" >/dev/null 2>&1 || die "failed to download $SCRIPT_NAME"
 
-mv "$tmp" "$install_dir/$SCRIPT_NAME" || die "failed to write to $install_dir/$SCRIPT_NAME"
-chmod +x "$install_dir/$SCRIPT_NAME" || die "failed to set executable permissions on $install_dir/$SCRIPT_NAME"
+mv "$tmp" "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to write to $install_dir/$SCRIPT_NAME"
+chmod +x "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to set executable permissions on $install_dir/$SCRIPT_NAME"
 
 echo "installed $SCRIPT_NAME to $install_dir/$SCRIPT_NAME"

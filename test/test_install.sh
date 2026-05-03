@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+: "${repo_root:?repo_root must be set by test harness}"
 install_script="$repo_root/install.sh"
 
 # setup_mock_curl creates a mock `curl` executable in the given directory; when `behavior` is `success` the mock writes a `#!/usr/bin/env bash` header to the file provided with `-o`, otherwise the mock exits with status 1.
