@@ -80,14 +80,20 @@ resolve_since_timestamp() {
   fi
   if echo "$since_input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
     local ts="${since_input}T00:00:00Z"
-    echo "$ts" | jq -R -e 'fromdateiso8601' >/dev/null 2>&1 \
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
       || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
     echo "$ts"
     return
   fi
   if echo "$since_input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
     local ts="${since_input}Z"
-    echo "$ts" | jq -R -e 'fromdateiso8601' >/dev/null 2>&1 \
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
       || die "invalid --since value: $since_input (expected: last-commit, <40-char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
     echo "$ts"
     return
