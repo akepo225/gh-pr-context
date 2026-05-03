@@ -26,6 +26,7 @@ usage() {
   echo "  --pr <number>   PR number (auto-detected from branch if omitted)"
   echo "  --since <ref>   Filter comments by time"
   echo "  --all           Return all comments (default)"
+  echo "  --version       Show version"
   echo "  -h, --help      Show this message"
 }
 
@@ -288,5 +289,6 @@ case "$command" in
   status)   cmd_status "$@" ;;
   logs)     cmd_logs "$@" ;;
   -h|--help) usage; exit 0 ;;
+  --version) echo "gh-pr-context $version"; exit 0 ;;
   *) die "unknown command: $command" ;;
 esac
