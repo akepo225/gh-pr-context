@@ -20,6 +20,12 @@ Install to a custom directory:
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | bash -s /usr/local/bin
 ```
 
+Or use the `INSTALL_DIR` environment variable:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | INSTALL_DIR=/usr/local/bin bash
+```
+
 ## Usage
 
 All commands auto-detect the PR from the current branch. Pass `--pr <number>` to target a specific PR.
