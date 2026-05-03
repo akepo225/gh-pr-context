@@ -198,7 +198,7 @@ cmd_status() {
   checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
     || die "failed to fetch check runs for SHA $sha"
 
-  echo "$checks_json" | jq -r '.check_runs | sort_by(.name) | .[] | "--- check\nname: \(.name)\nstatus: \(.status)" + (if .status == "completed" then "\nconclusion: \(.conclusion)" else "" end)'
+  echo "$checks_json" | jq -s -r 'map(.check_runs) | add // [] | sort_by(.name) | .[] | "--- check\nname: \(.name)\nstatus: \(.status)" + (if .status == "completed" then "\nconclusion: \(.conclusion)" else "" end)'
 }
 
 cmd_logs() {
