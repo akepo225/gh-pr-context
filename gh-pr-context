@@ -169,8 +169,36 @@ cmd_comments() {
 }
 
 cmd_status() {
+  local pr_number=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
   check_deps
-  die "status command not yet implemented"
+
+  if [ -z "$pr_number" ]; then
+    pr_number=$(resolve_pr_number)
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local sha
+  sha=$(resolve_pr_head_sha "$pr_number")
+
+  local checks_json
+  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
+    || die "failed to fetch check runs for SHA $sha"
+
+  echo "$checks_json" | jq -r '.check_runs | sort_by(.name) | .[] | "--- check\nname: \(.name)\nstatus: \(.status)" + (if .status == "completed" then "\nconclusion: \(.conclusion)" else "" end)'
 }
 
 cmd_logs() {
