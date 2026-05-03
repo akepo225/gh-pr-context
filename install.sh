@@ -6,6 +6,7 @@ BRANCH="master"
 SCRIPT_NAME="gh-pr-context"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
+# die prints an error message to stderr and exits with status 1.
 die() {
   echo "error: $1" >&2
   exit 1

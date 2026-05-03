@@ -2,6 +2,7 @@
 
 install_script="$repo_root/install.sh"
 
+# setup_mock_curl creates a mock `curl` executable in the given directory; when `behavior` is `success` the mock writes a `#!/usr/bin/env bash` header to the file provided with `-o`, otherwise the mock exits with status 1.
 setup_mock_curl() {
   local mockdir="$1"
   local behavior="${2:-success}"
@@ -27,6 +28,7 @@ MOCK
   chmod +x "$mockdir/curl"
 }
 
+# cleanup_tmpdir removes the specified directory and all of its contents recursively.
 cleanup_tmpdir() {
   rm -rf "$1"
 }
@@ -42,6 +44,7 @@ test_names+=(
   test_install_curl_failure_stderr
 )
 
+# test_install_default_dir verifies that running the installer with an empty INSTALL_DIR installs an executable `gh-pr-context` into `$HOME/.local/bin`.
 test_install_default_dir() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -61,6 +64,7 @@ test_install_default_dir() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_custom_dir_arg verifies the installer places an executable `gh-pr-context` in the custom directory provided as the first argument.
 test_install_custom_dir_arg() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -79,6 +83,7 @@ test_install_custom_dir_arg() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_custom_dir_env_var verifies the installer creates an executable `gh-pr-context` in the directory specified by the `INSTALL_DIR` environment variable.
 test_install_custom_dir_env_var() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -97,6 +102,7 @@ test_install_custom_dir_env_var() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_env_var_takes_precedence_over_arg verifies that the INSTALL_DIR environment variable takes precedence over a positional argument by ensuring `gh-pr-context` is created in the directory specified by `INSTALL_DIR`.
 test_install_env_var_takes_precedence_over_arg() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -115,6 +121,7 @@ test_install_env_var_takes_precedence_over_arg() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_file_is_executable verifies the installer creates an executable `gh-pr-context` in a custom `INSTALL_DIR`.
 test_install_file_is_executable() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -131,6 +138,7 @@ test_install_file_is_executable() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_curl_failure_exits_nonzero ensures the installer exits with a non-zero status when the mocked `curl` fails.
 test_install_curl_failure_exits_nonzero() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -148,6 +156,7 @@ test_install_curl_failure_exits_nonzero() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_success_message verifies the installer prints a success message including the installed gh-pr-context path.
 test_install_success_message() {
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -165,6 +174,7 @@ test_install_success_message() {
   cleanup_tmpdir "$tmpdir"
 }
 
+# test_install_curl_failure_stderr verifies that when `curl` fails the installer writes an `error:` message to stderr.
 test_install_curl_failure_stderr() {
   local tmpdir
   tmpdir=$(mktemp -d)
