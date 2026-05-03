@@ -137,13 +137,15 @@ cmd_comments() {
   local replies_map="{}"
   for cid in $review_ids; do
     local replies_raw
-    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate) \
-      || die "failed to fetch replies for comment $cid"
+    replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate 2>/dev/null) || replies_raw="[]"
     if [ -n "$since_ref" ]; then
       replies_raw=$(echo "$replies_raw" | jq --arg since "$since_ref" '[.[] | select(.created_at >= $since)]')
     fi
     local reply_fields
     reply_fields=$(echo "$replies_raw" | jq '[.[] | {author: .user.login, created: .created_at, body: .body}] | sort_by(.created)')
+    if [ "$reply_fields" = "[]" ] || [ -z "$reply_fields" ]; then
+      continue
+    fi
     replies_map=$(echo "$replies_map" | jq --arg cid "$cid" --argjson replies "$reply_fields" '. + {($cid): $replies}')
   done
 
