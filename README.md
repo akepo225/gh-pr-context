@@ -115,7 +115,7 @@ conclusion: failure
 
 An installable agent skill for LLM coding assistants is included in `skill/SKILL.md`. It provides a full QA & delivery review workflow that uses `gh-pr-context` to gather PR comments, CI status, and failed check logs before shipping.
 
-To install into your agent's skills directory:
+To install into your agent's skills directory (run from the cloned repo root):
 
 ```bash
 mkdir -p ~/.agents/skills/pr-qa-review && cp skill/SKILL.md ~/.agents/skills/pr-qa-review/SKILL.md
