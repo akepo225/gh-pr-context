@@ -118,7 +118,7 @@ An installable agent skill for LLM coding assistants is included in `skill/SKILL
 To install into your agent's skills directory:
 
 ```bash
-cp -r skill/ ~/.agents/skills/pr-qa-review/
+mkdir -p ~/.agents/skills/pr-qa-review && cp skill/SKILL.md ~/.agents/skills/pr-qa-review/SKILL.md
 ```
 
 ## License

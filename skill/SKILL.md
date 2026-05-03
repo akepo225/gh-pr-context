@@ -47,7 +47,7 @@ Run these commands in the project directory (branch must have an open PR, or pas
 # All comments (review comments with nested replies + issue comments)
 gh-pr-context comments
 
-# Only new comments since your last push — most useful for iterative review
+# Only new comments since your latest commit (uses commit timestamp, not push time)
 gh-pr-context comments --since last-commit
 
 # CI check status
