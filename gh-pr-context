@@ -192,7 +192,8 @@ cmd_status() {
   owner_repo=$(resolve_owner_repo)
 
   local sha
-  sha=$(resolve_pr_head_sha "$pr_number")
+  sha=$(resolve_pr_head_sha "$pr_number") \
+    || die "failed to resolve head SHA for PR #$pr_number"
 
   local checks_json
   checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \

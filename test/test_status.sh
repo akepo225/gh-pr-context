@@ -110,6 +110,7 @@ test_names+=(
   test_status_missing_pr_value_stderr_message
   test_status_help_exits_zero
   test_status_paginated_merges_all_checks
+  test_status_sha_lookup_failure_stderr_message
 )
 
 test_status_completed_check() {
@@ -305,5 +306,33 @@ test_status_paginated_merges_all_checks() {
   else
     fail=$((fail + 1))
     echo "FAIL: paginated response should merge all pages (output: $output)"
+  fi
+}
+
+setup_mocks_status_sha_fails() {
+  setup_mocks
+
+  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
+  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
+  printf "    echo '%s'\n" '42' >> "$mock_dir/gh"
+  printf '    ;;\n' >> "$mock_dir/gh"
+  printf '  *\"pulls/42\"*)\n' >> "$mock_dir/gh"
+  printf '    exit 1\n' >> "$mock_dir/gh"
+  printf '    ;;\n' >> "$mock_dir/gh"
+  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
+  printf 'esac\n' >> "$mock_dir/gh"
+  chmod +x "$mock_dir/gh"
+}
+
+test_status_sha_lookup_failure_stderr_message() {
+  setup_mocks_status_sha_fails
+  local output
+  output=$(run_script status 2>&1) || true
+  cleanup_mocks
+  if echo "$output" | grep -qF "failed to resolve head SHA"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: SHA lookup failure should mention 'failed to resolve head SHA' (output: $output)"
   fi
 }
