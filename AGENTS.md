@@ -47,3 +47,17 @@ GitHub Issues at `akepo225/gh-pr-context`. Issues labeled `needs-triage` await t
 ### Execution order
 
 Issues must be implemented in dependency order: #2 → #3/#4/#5 (parallel-safe, but #2 first) → #6 → #7 → #8.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues at `akepo225/gh-pr-context`. Uses `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five-label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.
