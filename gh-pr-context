@@ -209,6 +209,7 @@ cmd_logs() {
     case "$1" in
       --pr)
         [ $# -ge 2 ] || die "missing value for --pr"
+        [ -n "$2" ] || die "missing value for --pr"
         pr_number="$2"; shift 2
         ;;
       -h|--help) usage; exit 0 ;;
@@ -226,11 +227,11 @@ cmd_logs() {
   owner_repo=$(resolve_owner_repo)
 
   local sha
-  sha=$(resolve_pr_head_sha "$pr_number") \
+  sha=$(resolve_pr_head_sha "$pr_number" 2>/dev/null) \
     || die "failed to resolve head SHA for PR #$pr_number"
 
   local checks_json
-  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
+  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate 2>/dev/null) \
     || die "failed to fetch check runs for SHA $sha"
 
   local failed_pairs
@@ -257,7 +258,7 @@ cmd_logs() {
     total_lines=${total_lines//[[:space:]]/}
 
     if [ "$total_lines" -gt 500 ]; then
-      echo "$log_content" | head -500
+      echo "$log_content" | head -500 || true
       local omitted=$((total_lines - 500))
       echo "[truncated: $omitted lines omitted]"
     else

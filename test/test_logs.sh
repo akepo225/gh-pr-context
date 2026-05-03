@@ -161,6 +161,7 @@ test_names+=(
   test_logs_sha_lookup_failure
   test_logs_missing_pr_value_exits_nonzero
   test_logs_missing_pr_value_stderr_message
+  test_logs_empty_pr_value_exits_nonzero
   test_logs_unknown_option_exits_nonzero
   test_logs_help_exits_zero
   test_logs_log_fetch_fails_shows_placeholder
@@ -328,6 +329,10 @@ test_logs_missing_pr_value_exits_nonzero() {
 
 test_logs_missing_pr_value_stderr_message() {
   assert_stderr_contains "logs --pr without value gives clear message" "missing value for --pr" bash "$script" logs --pr
+}
+
+test_logs_empty_pr_value_exits_nonzero() {
+  assert_exit 1 "logs --pr empty exits non-zero" bash "$script" logs --pr ""
 }
 
 test_logs_unknown_option_exits_nonzero() {
