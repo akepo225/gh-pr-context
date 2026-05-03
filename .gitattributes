@@ -1,0 +1,4 @@
+# Shell scripts must use LF line endings
+*.sh text eol=lf
+gh-pr-context text eol=lf
+install.sh text eol=lf
