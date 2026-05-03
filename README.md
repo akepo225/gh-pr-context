@@ -111,6 +111,16 @@ conclusion: failure
 | `YYYY-MM-DD` | Comments on or after that date (UTC) |
 | `YYYY-MM-DDTHH:mm:ss` | Comments on or after that datetime (UTC) |
 
+## Agent Skill
+
+An installable agent skill for LLM coding assistants is included in `skill/SKILL.md`. It provides a full QA & delivery review workflow that uses `gh-pr-context` to gather PR comments, CI status, and failed check logs before shipping.
+
+To install into your agent's skills directory:
+
+```bash
+cp -r skill/ ~/.agents/skills/pr-qa-review/
+```
+
 ## License
 
 MIT
