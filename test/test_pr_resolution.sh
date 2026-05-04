@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 # setup_mocks_base sets up base mock implementations of `git` and `gh` for tests, where `git` returns a fixed origin URL or branch name and `gh` exits with failure.
 setup_mocks_base() {
   git() {
