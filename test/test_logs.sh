@@ -4,6 +4,7 @@ PATH="$HOME/bin:$PATH"
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
+# setup_mocks sets up test mocks for `git` and `gh`: `git` returns a fixed repository URL or branch name for specific queries, and `gh` exits with status 1 by default.
 setup_mocks() {
   git() {
     case "$*" in
@@ -18,6 +19,7 @@ setup_mocks() {
   }
 }
 
+# setup_mocks_logs sets up git/gh mocks where `gh` returns `HEAD_SHA` for `pulls/42`, the first argument as the `check-runs` JSON, and the second argument as the logs content (args: 1 = check-runs JSON, 2 = log content).
 setup_mocks_logs() {
   _MOCK_CHECK_RUNS="$1"
   _MOCK_LOG_CONTENT="$2"
@@ -32,6 +34,7 @@ setup_mocks_logs() {
   }
 }
 
+# setup_mocks_logs_multi sets up base mocks, exports _MOCK_LOG_<job_id> variables for each provided job-id/log-content pair, and defines a gh() mock that returns the PR head SHA for pulls/42, the supplied check-runs JSON for check-runs requests, or the corresponding per-job log content for logs requests.
 setup_mocks_logs_multi() {
   _MOCK_CHECK_RUNS="$1"
   shift
@@ -59,6 +62,9 @@ setup_mocks_logs_multi() {
   }
 }
 
+# setup_mocks_logs_auto configures git and gh mock functions to simulate auto-detection of the pull request for the current branch and to serve provided check-run JSON and log content.
+# 
+# _MOCK_CHECK_RUNS is the JSON string that will be returned for check-run queries; _MOCK_LOG_CONTENT is the text that will be returned for log requests.
 setup_mocks_logs_auto() {
   _MOCK_CHECK_RUNS="$1"
   _MOCK_LOG_CONTENT="$2"
@@ -74,6 +80,7 @@ setup_mocks_logs_auto() {
   }
 }
 
+# setup_mocks_logs_no_pr sets up base mocks and overrides gh to return an empty response for the PR lookup query (simulating no matching pull request).
 setup_mocks_logs_no_pr() {
   setup_mocks
   gh() {
@@ -84,6 +91,7 @@ setup_mocks_logs_no_pr() {
   }
 }
 
+# setup_mocks_logs_sha_fails sets up mocked git/gh behavior where PR auto-detection returns `42` but the subsequent pull request SHA lookup fails.
 setup_mocks_logs_sha_fails() {
   setup_mocks
   gh() {
@@ -95,6 +103,7 @@ setup_mocks_logs_sha_fails() {
   }
 }
 
+# setup_mocks_logs_no_log sets up git/gh mocks where `gh` returns `HEAD_SHA` for pulls/42, returns the provided check-runs JSON for check-runs, and exits with status 1 when logs are requested.
 setup_mocks_logs_no_log() {
   _MOCK_CHECK_RUNS="$1"
   setup_mocks
@@ -108,6 +117,7 @@ setup_mocks_logs_no_log() {
   }
 }
 
+# run_script exports the mocked `git`/`gh` functions and mock variables, then invokes the target script with the provided arguments.
 run_script() {
   export -f git gh
   export _MOCK_CHECK_RUNS _MOCK_LOG_CONTENT HEAD_SHA
@@ -133,6 +143,7 @@ test_names+=(
   test_logs_log_fetch_fails_shows_placeholder
 )
 
+# test_logs_failed_check_shows_log verifies that a failed check's log block, including the check name and its log content, appears in the command output.
 test_logs_failed_check_shows_log() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log_content="Running tests...\nTest failed: expected 200 got 500"
@@ -150,6 +161,7 @@ test_logs_failed_check_shows_log() {
   fi
 }
 
+# test_logs_all_passing_no_output verifies that when all check runs conclude with "success", running the `logs` command produces no output.
 test_logs_all_passing_no_output() {
   local check_runs='{"total_count":2,"check_runs":[{"id":111,"name":"Build","status":"completed","conclusion":"success"},{"id":222,"name":"Test","status":"completed","conclusion":"success"}]}'
   setup_mocks_logs "$check_runs" "should not appear"
@@ -163,6 +175,7 @@ test_logs_all_passing_no_output() {
   fi
 }
 
+# test_logs_multiple_failures verifies that `logs --pr` outputs two log blocks (one per failed check) and includes each check's `name`.
 test_logs_multiple_failures() {
   local check_runs='{"total_count":2,"check_runs":[{"id":222,"name":"Test","status":"completed","conclusion":"failure"},{"id":111,"name":"Build","status":"completed","conclusion":"failure"}]}'
   setup_mocks_logs_multi "$check_runs" 111 "build error at line 5" 222 "test assertion failed"
@@ -180,6 +193,7 @@ test_logs_multiple_failures() {
   fi
 }
 
+# test_logs_explicit_pr verifies that when an explicit PR number is provided, failing check run logs (including the check name) are printed.
 test_logs_explicit_pr() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log_content="error in CI"
@@ -194,6 +208,7 @@ test_logs_explicit_pr() {
   fi
 }
 
+# test_logs_auto_detect verifies that running `logs` without `--pr` auto-detects the PR and prints the failing check's logs.
 test_logs_auto_detect() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log_content="error in CI"
@@ -208,6 +223,7 @@ test_logs_auto_detect() {
   fi
 }
 
+# test_logs_truncation_at_500_lines verifies that when a job log exceeds 500 lines, the reported output contains at most 500 content lines (excluding headers) and includes a "[truncated:" notice.
 test_logs_truncation_at_500_lines() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log_content
@@ -225,6 +241,7 @@ test_logs_truncation_at_500_lines() {
   fi
 }
 
+# test_logs_truncation_notice_format verifies that the logs command includes the "[truncated: 100 lines omitted]" notice when a job's log exceeds 500 lines.
 test_logs_truncation_notice_format() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   local log_content
@@ -255,6 +272,7 @@ test_logs_under_500_no_truncation() {
   fi
 }
 
+# test_logs_no_pr_found_exits_nonzero adds a test that verifies `logs` exits with a non-zero status when no pull request is found.
 test_logs_no_pr_found_exits_nonzero() {
   setup_mocks_logs_no_pr
   local exit_code=0
@@ -287,6 +305,7 @@ test_logs_missing_pr_value_stderr_message() {
   assert_stderr_contains "logs --pr without value gives clear message" "missing value for --pr" bash "$script" logs --pr
 }
 
+# test_logs_empty_pr_value_exits_nonzero asserts that invoking `logs --pr ""` exits with a nonzero status.
 test_logs_empty_pr_value_exits_nonzero() {
   assert_exit 1 "logs --pr empty exits non-zero" bash "$script" logs --pr ""
 }
@@ -309,6 +328,7 @@ test_logs_help_exits_zero() {
   assert_exit 0 "logs -h exits 0" bash "$script" logs -h
 }
 
+# test_logs_log_fetch_fails_shows_placeholder verifies that when fetching a job's logs fails the `logs` command prints a log placeholder and includes the job name.
 test_logs_log_fetch_fails_shows_placeholder() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   setup_mocks_logs_no_log "$check_runs"

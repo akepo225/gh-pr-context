@@ -2,6 +2,7 @@
 
 PATH="$HOME/bin:$PATH"
 
+# setup_mocks_base sets up base mock implementations of `git` and `gh` for tests, where `git` returns a fixed origin URL or branch name and `gh` exits with failure.
 setup_mocks_base() {
   git() {
     case "$*" in
@@ -15,6 +16,7 @@ setup_mocks_base() {
   }
 }
 
+# setup_mocks_auto_detect sets up base git/gh mocks, sets _MOCK_HEAD_SHA to a fixed SHA, and overrides gh() to simulate auto-detection of PR 99 by returning the PR number, empty comments, the PR head SHA, and an empty check-runs response.
 setup_mocks_auto_detect() {
   setup_mocks_base
   _MOCK_HEAD_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -30,6 +32,7 @@ setup_mocks_auto_detect() {
   }
 }
 
+# setup_mocks_explicit_pr sets up mocked git and gh functions for tests that use an explicit PR number (55), providing a fixed head SHA, returning empty comment lists and check-run metadata, and failing if auto-detect (`pulls?head=`) is invoked.
 setup_mocks_explicit_pr() {
   setup_mocks_base
   _MOCK_HEAD_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -45,6 +48,7 @@ setup_mocks_explicit_pr() {
   }
 }
 
+# setup_mocks_no_pr sets up base mocks and overrides gh to simulate "no open PR" by returning an empty string for pull requests queried by head and exiting non-zero for any other gh calls.
 setup_mocks_no_pr() {
   setup_mocks_base
   gh() {
@@ -55,6 +59,7 @@ setup_mocks_no_pr() {
   }
 }
 
+# setup_mocks_api_fail configures base mocks and overrides `gh` to always fail, simulating a GitHub CLI/API failure.
 setup_mocks_api_fail() {
   setup_mocks_base
   gh() {
@@ -62,6 +67,7 @@ setup_mocks_api_fail() {
   }
 }
 
+# run_script exports mocked git and gh functions and _MOCK_HEAD_SHA into the environment and invokes the target script with the provided arguments.
 run_script() {
   export -f git gh
   export _MOCK_HEAD_SHA
@@ -81,6 +87,7 @@ test_names+=(
   test_pr_resolution_api_fail_stderr_message
 )
 
+# test_pr_resolution_auto_detect_comments verifies that auto-detect resolves PR 99 and that running `comments` succeeds; it updates the global `pass`/`fail` counters and prints a failure message with the exit code when it fails.
 test_pr_resolution_auto_detect_comments() {
   setup_mocks_auto_detect
   local exit_code=0
@@ -93,6 +100,7 @@ test_pr_resolution_auto_detect_comments() {
   fi
 }
 
+# test_pr_resolution_auto_detect_status runs the `status` command with auto-detect mocks, expects the PR to be resolved to 99, and updates the global `pass`/`fail` counters (prints a failure message if the command exits non-zero).
 test_pr_resolution_auto_detect_status() {
   setup_mocks_auto_detect
   local exit_code=0
@@ -105,6 +113,7 @@ test_pr_resolution_auto_detect_status() {
   fi
 }
 
+# test_pr_resolution_auto_detect_logs verifies that auto-detect resolves PR 99 for the logs command and increments the global pass or fail counter based on the command's exit status.
 test_pr_resolution_auto_detect_logs() {
   setup_mocks_auto_detect
   local exit_code=0
@@ -117,6 +126,7 @@ test_pr_resolution_auto_detect_logs() {
   fi
 }
 
+# test_pr_resolution_explicit_pr_skips_autodetect_comments verifies that providing --pr 55 prevents auto-detection when running the comments command and updates the global pass/fail counters, printing a diagnostic on failure.
 test_pr_resolution_explicit_pr_skips_autodetect_comments() {
   setup_mocks_explicit_pr
   local output exit_code=0
@@ -129,6 +139,7 @@ test_pr_resolution_explicit_pr_skips_autodetect_comments() {
   fi
 }
 
+# test_pr_resolution_explicit_pr_skips_autodetect_status verifies that providing `--pr 55` prevents auto-detection and succeeds when running the `status` command.
 test_pr_resolution_explicit_pr_skips_autodetect_status() {
   setup_mocks_explicit_pr
   local output exit_code=0
@@ -141,6 +152,7 @@ test_pr_resolution_explicit_pr_skips_autodetect_status() {
   fi
 }
 
+# test_pr_resolution_explicit_pr_skips_autodetect_logs ensures an explicit --pr argument prevents auto-detection when invoking the logs command and updates global pass/fail counters, printing a diagnostic message on failure.
 test_pr_resolution_explicit_pr_skips_autodetect_logs() {
   setup_mocks_explicit_pr
   local output exit_code=0
@@ -153,6 +165,7 @@ test_pr_resolution_explicit_pr_skips_autodetect_logs() {
   fi
 }
 
+# test_pr_resolution_no_pr_found_exits_nonzero verifies that the script exits with a non-zero status when no open PR is found.
 test_pr_resolution_no_pr_found_exits_nonzero() {
   setup_mocks_no_pr
   local exit_code=0
@@ -165,6 +178,7 @@ test_pr_resolution_no_pr_found_exits_nonzero() {
   fi
 }
 
+# test_pr_resolution_no_pr_found_stderr_message checks that the comments command emits the literal "no open PR found" when no open PR is found.
 test_pr_resolution_no_pr_found_stderr_message() {
   setup_mocks_no_pr
   local output
@@ -177,6 +191,7 @@ test_pr_resolution_no_pr_found_stderr_message() {
   fi
 }
 
+# test_pr_resolution_api_fail_exits_nonzero verifies that when the GitHub API fails, running `comments` exits with a non-zero status and the test harness updates the pass/fail counters accordingly.
 test_pr_resolution_api_fail_exits_nonzero() {
   setup_mocks_api_fail
   local exit_code=0
@@ -189,6 +204,7 @@ test_pr_resolution_api_fail_exits_nonzero() {
   fi
 }
 
+# test_pr_resolution_api_fail_stderr_message checks that invoking comments when the GitHub API fails prints a message containing "failed" and updates the pass/fail counters.
 test_pr_resolution_api_fail_stderr_message() {
   setup_mocks_api_fail
   local output

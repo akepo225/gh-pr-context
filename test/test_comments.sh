@@ -10,6 +10,7 @@ MOCK_HEAD_EPOCH="1748772000"
 MOCK_SHA_EPOCH="1749988800"
 _MOCK_REPLY_IDS=""
 
+# setup_mocks defines in-process mock `git` and `gh` functions for tests that return deterministic repository metadata and commit timestamps; `git` responds to specific queries (remote URL, current branch, and commit epochs for known SHAs) and fails for unknown SHAs, while `gh` defaults to exiting with error.
 setup_mocks() {
   git() {
     case "$*" in
@@ -27,6 +28,7 @@ setup_mocks() {
   }
 }
 
+# _clear_reply_vars unsets any `_MOCK_REPLY_<id>` mock variables listed in `_MOCK_REPLY_IDS` and resets `_MOCK_REPLY_IDS` to an empty string.
 _clear_reply_vars() {
   for cid in $_MOCK_REPLY_IDS; do
     unset "_MOCK_REPLY_${cid}" 2>/dev/null || true
@@ -34,6 +36,7 @@ _clear_reply_vars() {
   _MOCK_REPLY_IDS=""
 }
 
+# setup_mocks_with_pr sets up mock git/gh behavior for a pull request and registers provided JSON payloads for review comments (first arg) and issue comments (second arg).
 setup_mocks_with_pr() {
   _MOCK_PR_REVIEWS="$1"
   _MOCK_PR_ISSUES="$2"
@@ -52,6 +55,7 @@ setup_mocks_with_pr() {
   }
 }
 
+# setup_mocks_with_pr_and_replies sets up git/gh mock functions for a pull request: the first argument is the JSON array for review comments, the second is the JSON array for issue comments, and any additional arguments are reply specs in the form "<comment_id>:<json>" which are exported as _MOCK_REPLY_<comment_id> and tracked in _MOCK_REPLY_IDS.
 setup_mocks_with_pr_and_replies() {
   _MOCK_PR_REVIEWS="$1"
   _MOCK_PR_ISSUES="$2"
@@ -84,6 +88,8 @@ setup_mocks_with_pr_and_replies() {
   }
 }
 
+# run_script runs the test script under the current mock environment.
+# It exports the mocked git/gh functions and the mock state variables, then invokes bash on $script with any provided arguments.
 run_script() {
   export -f git gh
   export _MOCK_PR_REVIEWS _MOCK_PR_ISSUES MOCK_HEAD_EPOCH MOCK_SHA_EPOCH KNOWN_SHA UNKNOWN_SHA
@@ -119,6 +125,7 @@ test_names+=(
   test_since_unknown_sha_stderr_message
 )
 
+# test_comments_empty_pr_no_output verifies that invoking `comments --pr 42` against a PR with no review or issue comments produces no output.
 test_comments_empty_pr_no_output() {
   setup_mocks_with_pr '[]' '[]'
   local output
@@ -131,6 +138,7 @@ test_comments_empty_pr_no_output() {
   fi
 }
 
+# test_comments_review_only verifies that a pull request review comment is rendered and includes the reviewer and the `review-comment` marker.
 test_comments_review_only() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]' '[]'
   local output
@@ -143,6 +151,7 @@ test_comments_review_only() {
   fi
 }
 
+# test_comments_issue_only sets up a PR with only an issue comment and verifies the `comments` command prints an `issue-comment` block containing author `bob`, incrementing pass or fail and printing a diagnostic on failure.
 test_comments_issue_only() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"looks good"}]'
   local output
@@ -155,6 +164,7 @@ test_comments_issue_only() {
   fi
 }
 
+# test_comments_sorted_by_date verifies that comments are listed in chronological order so an earlier issue comment appears before a later review comment.
 test_comments_sorted_by_date() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-02T10:00:00Z","path":"a.sh","line":1,"body":"review later"}]'
   local issue_json='[{"user":{"login":"bob"},"created_at":"2025-01-01T10:00:00Z","body":"issue earlier"}]'
@@ -171,6 +181,7 @@ test_comments_sorted_by_date() {
   fi
 }
 
+# test_comments_review_has_path_and_line sets up a mocked PR review with a file path and line number and asserts the comments command prints `path:` and `line:` in its output.
 test_comments_review_has_path_and_line() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":42,"body":"fix this"}]' '[]'
   local output
@@ -183,6 +194,7 @@ test_comments_review_has_path_and_line() {
   fi
 }
 
+# test_comments_issue_no_path_or_line verifies that issue comments produced for a PR do not include `path:` or `line:` fields.
 test_comments_issue_no_path_or_line() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"bob"},"created_at":"2025-01-01T10:00:00Z","body":"general comment"}]'
   local output
@@ -195,6 +207,7 @@ test_comments_issue_no_path_or_line() {
   fi
 }
 
+# test_comments_explicit_pr sets up mock PR comments and verifies that running `comments --pr 42` outputs the mocked author "alice", updating the pass or fail counters.
 test_comments_explicit_pr() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","body":"hello"}]'
   local output
@@ -212,6 +225,7 @@ test_comments_exits_zero_on_success() {
   assert_exit 0 "comments exits 0 on success" run_script comments --pr 42
 }
 
+# test_comments_multiline_body verifies that a review comment body with multiple lines is fully rendered in the command output.
 test_comments_multiline_body() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"line one\nline two"}]' '[]'
   local output
@@ -239,6 +253,7 @@ test_comments_multiple_review_sorted() {
   fi
 }
 
+# test_comments_review_with_replies verifies that the comments command prints a reply block for a review comment that has replies and includes the reply's author, body, and created timestamp.
 test_comments_review_with_replies() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
   local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
@@ -256,6 +271,7 @@ test_comments_review_with_replies() {
   fi
 }
 
+# test_comments_review_no_replies verifies that a review comment with no replies is displayed without a ">>> reply" block.
 test_comments_review_no_replies() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
   setup_mocks_with_pr_and_replies "$review_json" '[]'
@@ -269,6 +285,7 @@ test_comments_review_no_replies() {
   fi
 }
 
+# test_comments_mixed_replies verifies that a review with replies shows a reply block while another review without replies does not.
 test_comments_mixed_replies() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"has replies"},{"id":102,"user":{"login":"carol"},"created_at":"2025-01-01T09:00:00Z","path":"b.sh","line":2,"body":"no replies"}]'
   local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"reply here"}]'
@@ -287,6 +304,7 @@ test_comments_mixed_replies() {
   fi
 }
 
+# test_comments_issue_stays_flat verifies that issue comments remain flat (no `>>>` reply markers) even when review comments have replies.
 test_comments_issue_stays_flat() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"}]'
   local issue_json='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"issue comment"}]'
@@ -305,6 +323,7 @@ test_comments_issue_stays_flat() {
   fi
 }
 
+# test_comments_replies_sorted_under_parent verifies that replies to a review are sorted by `created_at` so the earliest reply is shown first.
 test_comments_replies_sorted_under_parent() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
   local replies_data='[{"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","body":"later reply"},{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"earlier reply"}]'
@@ -321,6 +340,7 @@ test_comments_replies_sorted_under_parent() {
   fi
 }
 
+# test_comments_reply_in_main_response_not_duplicated ensures a reply that appears inline in the main review list and also via the replies endpoint is printed exactly once.
 test_comments_reply_in_main_response_not_duplicated() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":102,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"inline reply"}]'
   local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"inline reply"}]'
@@ -337,6 +357,7 @@ test_comments_reply_in_main_response_not_duplicated() {
   fi
 }
 
+# test_since_last_commit_filters_old verifies that running `comments --since last-commit` excludes comments older than the mocked HEAD commit while including comments whose timestamps are equal to or newer than the mocked HEAD.
 test_since_last_commit_filters_old() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-05-01T09:00:00Z","path":"a.sh","line":1,"body":"old comment"},{"user":{"login":"bob"},"created_at":"2025-07-01T10:00:00Z","path":"b.sh","line":2,"body":"new comment"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"exact match"}]'
@@ -353,6 +374,7 @@ test_since_last_commit_filters_old() {
   fi
 }
 
+# test_since_date_filters_old verifies that using `--since YYYY-MM-DD` excludes comments created before that date while including comments on or after it.
 test_since_date_filters_old() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-05-15T23:59:59Z","path":"a.sh","line":1,"body":"before date"},{"user":{"login":"bob"},"created_at":"2025-06-01T00:00:00Z","path":"b.sh","line":2,"body":"on date"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-15T12:00:00Z","body":"after date"}]'
@@ -369,6 +391,7 @@ test_since_date_filters_old() {
   fi
 }
 
+# test_since_datetime_filters_old verifies that comments before a specified ISO datetime are excluded and comments at or after that datetime are included.
 test_since_datetime_filters_old() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-06-01T09:59:59Z","path":"a.sh","line":1,"body":"before datetime"},{"user":{"login":"bob"},"created_at":"2025-06-01T10:00:00Z","path":"b.sh","line":2,"body":"exact datetime"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T12:00:00Z","body":"after datetime"}]'
@@ -385,6 +408,7 @@ test_since_datetime_filters_old() {
   fi
 }
 
+# test_since_sha_filters_old verifies that --since <SHA> filters out comments created before the commit timestamp corresponding to KNOWN_SHA while keeping comments at or after that timestamp.
 test_since_sha_filters_old() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-06-10T09:00:00Z","path":"a.sh","line":1,"body":"before sha"},{"user":{"login":"bob"},"created_at":"2025-06-20T10:00:00Z","path":"b.sh","line":2,"body":"after sha"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-15T12:00:00Z","body":"exact sha ts"}]'
@@ -401,6 +425,7 @@ test_since_sha_filters_old() {
   fi
 }
 
+# test_since_no_filter_returns_all verifies that when no `--since` filter is given the command returns all comments across reviews and issues.
 test_since_no_filter_returns_all() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"old"},{"user":{"login":"bob"},"created_at":"2025-12-01T10:00:00Z","path":"b.sh","line":2,"body":"new"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"mid"}]'
@@ -417,6 +442,7 @@ test_since_no_filter_returns_all() {
   fi
 }
 
+# test_since_all_overrides_since verifies that using --all causes all PR and issue comments to be returned even when a --since filter is provided.
 test_since_all_overrides_since() {
   local review_json='[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"old"},{"user":{"login":"bob"},"created_at":"2025-12-01T10:00:00Z","path":"b.sh","line":2,"body":"new"}]'
   local issue_json='[{"user":{"login":"carol"},"created_at":"2025-06-01T10:00:00Z","body":"mid"}]'
@@ -433,6 +459,7 @@ test_since_all_overrides_since() {
   fi
 }
 
+# test_since_last_commit_includes_equal verifies that comments with created_at exactly equal to the PR HEAD timestamp are included when filtering with --since last-commit.
 test_since_last_commit_includes_equal() {
   local issue_json="[{\"user\":{\"login\":\"alice\"},\"created_at\":\"$MOCK_HEAD_TS\",\"body\":\"exactly at HEAD ts\"}]"
   setup_mocks_with_pr '[]' "$issue_json"
@@ -446,6 +473,9 @@ test_since_last_commit_includes_equal() {
   fi
 }
 
+# test_since_filters_replies_too verifies that the `--since` option filters reply comments by their `created_at` timestamp.
+# It sets up a parent review with one old and one new reply, runs `comments --pr 42 --since 2025-06-01T00:00:00`,
+# and asserts that only the reply on/after the cutoff appears in the output.
 test_since_filters_replies_too() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-07-01T10:00:00Z","path":"a.sh","line":1,"body":"new parent"}]'
   local replies_data='[{"user":{"login":"bob"},"created_at":"2025-05-01T10:00:00Z","body":"old reply"},{"user":{"login":"carol"},"created_at":"2025-08-01T10:00:00Z","body":"new reply"}]'
@@ -461,6 +491,7 @@ test_since_filters_replies_too() {
   fi
 }
 
+# test_since_unknown_sha_exits_nonzero verifies that invoking `comments` with `--since` set to an unknown commit SHA causes the command to exit with a non-zero status.
 test_since_unknown_sha_exits_nonzero() {
   setup_mocks_with_pr '[]' '[]'
   local exit_code=0
@@ -473,6 +504,7 @@ test_since_unknown_sha_exits_nonzero() {
   fi
 }
 
+# test_since_unknown_sha_stderr_message tests that invoking comments with --since set to an unknown SHA emits an "unknown commit" message.
 test_since_unknown_sha_stderr_message() {
   setup_mocks_with_pr '[]' '[]'
   local output
