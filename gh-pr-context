@@ -282,19 +282,21 @@ cmd_logs() {
   done <<< "$failed_pairs"
 }
 
-if [ $# -eq 0 ]; then
-  usage
-  exit 1
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if [ $# -eq 0 ]; then
+    usage
+    exit 1
+  fi
+
+  command=$1
+  shift
+
+  case "$command" in
+    comments) cmd_comments "$@" ;;
+    status)   cmd_status "$@" ;;
+    logs)     cmd_logs "$@" ;;
+    -h|--help) usage; exit 0 ;;
+    --version) echo "gh-pr-context $version"; exit 0 ;;
+    *) die "unknown command: $command" ;;
+  esac
 fi
-
-command=$1
-shift
-
-case "$command" in
-  comments) cmd_comments "$@" ;;
-  status)   cmd_status "$@" ;;
-  logs)     cmd_logs "$@" ;;
-  -h|--help) usage; exit 0 ;;
-  --version) echo "gh-pr-context $version"; exit 0 ;;
-  *) die "unknown command: $command" ;;
-esac

@@ -1,96 +1,86 @@
 #!/usr/bin/env bash
 
-ORIGINAL_PATH="$HOME/bin:$PATH"
+PATH="$HOME/bin:$PATH"
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
 setup_mocks() {
-  mock_dir=$(mktemp -d)
-  cat > "$mock_dir/git" << GIT_EOF
-#!/usr/bin/env bash
-case "\$*" in
-  "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
-  "branch --show-current") echo "feature-branch" ;;
-  "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-  *) exit 1 ;;
-esac
-GIT_EOF
-  chmod +x "$mock_dir/git"
+  git() {
+    case "$*" in
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "branch --show-current") echo "feature-branch" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    exit 1
+  }
 }
 
 setup_mocks_status() {
-  local check_runs="$1"
-
+  _MOCK_CHECK_RUNS="$1"
   setup_mocks
-
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls/42\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$HEAD_SHA" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"check-runs\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$check_runs" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+  gh() {
+    case "$*" in
+      *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 setup_mocks_status_auto() {
-  local check_runs="$1"
-
+  _MOCK_CHECK_RUNS="$1"
   setup_mocks
-
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" '42' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/42\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$HEAD_SHA" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"check-runs\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$check_runs" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo '42' ;;
+      *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 setup_mocks_status_no_pr() {
   setup_mocks
-
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
-  printf '    echo ""\n' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo "" ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 setup_mocks_status_paginated() {
-  local page1="$1"
-  local page2="$2"
-
+  _MOCK_PAGE1="$1"
+  _MOCK_PAGE2="$2"
   setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*) printf '%s\n' "$_MOCK_PAGE1" "$_MOCK_PAGE2" ;;
+      *) exit 1 ;;
+    esac
+  }
+}
 
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls/42\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$HEAD_SHA" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"check-runs\"*)\n' >> "$mock_dir/gh"
-  printf "    printf '%%s\\n' '%s' '%s'\n" "$page1" "$page2" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+setup_mocks_status_sha_fails() {
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo '42' ;;
+      *"pulls/42"*) exit 1 ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 run_script() {
-  PATH="$mock_dir:$ORIGINAL_PATH" bash "$script" "$@"
-}
-
-cleanup_mocks() {
-  rm -rf "$mock_dir"
+  export -f git gh
+  export _MOCK_CHECK_RUNS _MOCK_PAGE1 _MOCK_PAGE2 HEAD_SHA
+  bash "$script" "$@"
 }
 
 test_names+=(
@@ -118,7 +108,6 @@ test_status_completed_check() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF -- "--- check" \
     && echo "$output" | grep -qF "name: CI" \
     && echo "$output" | grep -qF "status: completed" \
@@ -135,7 +124,6 @@ test_status_in_progress_omits_conclusion() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "status: in_progress" \
     && ! echo "$output" | grep -qF "conclusion:"; then
     pass=$((pass + 1))
@@ -150,7 +138,6 @@ test_status_queued_omits_conclusion() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "status: queued" \
     && ! echo "$output" | grep -qF "conclusion:"; then
     pass=$((pass + 1))
@@ -165,7 +152,6 @@ test_status_sorted_by_name() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   local first_name
   first_name=$(echo "$output" | grep -m1 "name:" | sed 's/name: //')
   if [ "$first_name" = "Alpha" ]; then
@@ -181,7 +167,6 @@ test_status_explicit_pr() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "name: CI"; then
     pass=$((pass + 1))
   else
@@ -195,7 +180,6 @@ test_status_auto_detect() {
   setup_mocks_status_auto "$check_runs"
   local output
   output=$(run_script status 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "name: CI"; then
     pass=$((pass + 1))
   else
@@ -208,14 +192,12 @@ test_status_exits_zero() {
   local check_runs='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
   setup_mocks_status "$check_runs"
   assert_exit 0 "status exits 0 on success" run_script status --pr 42
-  cleanup_mocks
 }
 
 test_status_no_pr_found_exits_nonzero() {
   setup_mocks_status_no_pr
   local exit_code=0
   run_script status >/dev/null 2>&1 || exit_code=$?
-  cleanup_mocks
   if [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
@@ -224,12 +206,23 @@ test_status_no_pr_found_exits_nonzero() {
   fi
 }
 
+test_status_no_pr_found_stderr_message() {
+  setup_mocks_status_no_pr
+  local output
+  output=$(run_script status 2>&1) || true
+  if echo "$output" | grep -qF "no open PR found"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: no PR found should mention 'no open PR found' (output: $output)"
+  fi
+}
+
 test_status_empty_checks() {
   local check_runs='{"total_count":0,"check_runs":[]}'
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if [ -z "$output" ]; then
     pass=$((pass + 1))
   else
@@ -243,7 +236,6 @@ test_status_multiple_conclusions() {
   setup_mocks_status "$check_runs"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "conclusion: success" \
     && echo "$output" | grep -qF "conclusion: failure" \
     && echo "$output" | grep -qF "conclusion: cancelled"; then
@@ -255,28 +247,15 @@ test_status_multiple_conclusions() {
 }
 
 test_status_unknown_option_exits_nonzero() {
-  setup_mocks
+  local check_runs='{"total_count":0,"check_runs":[]}'
+  setup_mocks_status "$check_runs"
   local exit_code=0
-  PATH="$mock_dir:$ORIGINAL_PATH" bash "$script" status --pr 42 --bogus >/dev/null 2>&1 || exit_code=$?
-  cleanup_mocks
+  run_script status --pr 42 --bogus >/dev/null 2>&1 || exit_code=$?
   if [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
     echo "FAIL: unknown option should exit non-zero"
-  fi
-}
-
-test_status_no_pr_found_stderr_message() {
-  setup_mocks_status_no_pr
-  local output
-  output=$(run_script status 2>&1) || true
-  cleanup_mocks
-  if echo "$output" | grep -qF "no open PR found"; then
-    pass=$((pass + 1))
-  else
-    fail=$((fail + 1))
-    echo "FAIL: no PR found should mention 'no open PR found' (output: $output)"
   fi
 }
 
@@ -299,7 +278,6 @@ test_status_paginated_merges_all_checks() {
   setup_mocks_status_paginated "$page1" "$page2"
   local output
   output=$(run_script status --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "name: Alpha" \
     && echo "$output" | grep -qF "name: Zebra"; then
     pass=$((pass + 1))
@@ -309,26 +287,10 @@ test_status_paginated_merges_all_checks() {
   fi
 }
 
-setup_mocks_status_sha_fails() {
-  setup_mocks
-
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" '42' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/42\"*)\n' >> "$mock_dir/gh"
-  printf '    exit 1\n' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
-}
-
 test_status_sha_lookup_failure_stderr_message() {
   setup_mocks_status_sha_fails
   local output
   output=$(run_script status 2>&1) || true
-  cleanup_mocks
   if echo "$output" | grep -qF "failed to resolve head SHA"; then
     pass=$((pass + 1))
   else

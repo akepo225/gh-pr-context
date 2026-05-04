@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-ORIGINAL_PATH="$HOME/bin:$PATH"
+PATH="$HOME/bin:$PATH"
 
 KNOWN_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 UNKNOWN_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -8,94 +8,86 @@ MOCK_HEAD_TS="2025-06-01T10:00:00Z"
 MOCK_SHA_TS="2025-06-15T12:00:00Z"
 MOCK_HEAD_EPOCH="1748772000"
 MOCK_SHA_EPOCH="1749988800"
+_MOCK_REPLY_IDS=""
 
 setup_mocks() {
-  mock_dir=$(mktemp -d)
-  cat > "$mock_dir/git" << GIT_EOF
-#!/usr/bin/env bash
-case "\$*" in
-  "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
-  "branch --show-current") echo "feature-branch" ;;
-  "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-  "log -1 --format=%ct HEAD") echo "$MOCK_HEAD_EPOCH" ;;
-  "log -1 --format=%ct $KNOWN_SHA") echo "$MOCK_SHA_EPOCH" ;;
-  "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
-  *) exit 1 ;;
-esac
-GIT_EOF
-  chmod +x "$mock_dir/git"
+  git() {
+    case "$*" in
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "branch --show-current") echo "feature-branch" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      "log -1 --format=%ct HEAD") echo "$MOCK_HEAD_EPOCH" ;;
+      "log -1 --format=%ct $KNOWN_SHA") echo "$MOCK_SHA_EPOCH" ;;
+      "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    exit 1
+  }
+}
+
+_clear_reply_vars() {
+  for cid in $_MOCK_REPLY_IDS; do
+    unset "_MOCK_REPLY_${cid}" 2>/dev/null || true
+  done
+  _MOCK_REPLY_IDS=""
 }
 
 setup_mocks_with_pr() {
-  local pr_reviews="$1"
-  local pr_issues="$2"
+  _MOCK_PR_REVIEWS="$1"
+  _MOCK_PR_ISSUES="$2"
 
   setup_mocks
+  _clear_reply_vars
 
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" '[{"number":42}]' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/42/comments\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$pr_reviews" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"issues/42/comments\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$pr_issues" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/comments/\"*\"/replies\"*)\n' >> "$mock_dir/gh"
-  printf '    echo "[]"\n' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo '[{"number":42}]' ;;
+      *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
+      *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
+      *"pulls/comments/"*"/replies"*) echo '[]' ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 setup_mocks_with_pr_and_replies() {
-  local pr_reviews="$1"
-  local pr_issues="$2"
+  _MOCK_PR_REVIEWS="$1"
+  _MOCK_PR_ISSUES="$2"
   shift 2
 
   setup_mocks
+  _clear_reply_vars
 
   local reply_spec cid rdata
   for reply_spec in "$@"; do
     cid="${reply_spec%%:*}"
     rdata="${reply_spec#*:}"
-    echo "$rdata" > "$mock_dir/replies_${cid}.json"
+    export "_MOCK_REPLY_${cid}=$rdata"
+    _MOCK_REPLY_IDS="$_MOCK_REPLY_IDS $cid"
   done
 
-  printf '#!/usr/bin/env bash\ncase "$*" in\n' > "$mock_dir/gh"
-  printf '  *\"pulls?head=acme:feature-branch\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" '[{"number":42}]' >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/42/comments\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$pr_reviews" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"issues/42/comments\"*)\n' >> "$mock_dir/gh"
-  printf "    echo '%s'\n" "$pr_issues" >> "$mock_dir/gh"
-  printf '    ;;\n' >> "$mock_dir/gh"
-  printf '  *\"pulls/comments/\"*\"/replies\"*)\n' >> "$mock_dir/gh"
-  cat >> "$mock_dir/gh" << 'REPLY_MOCK'
-    _cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
-    _mdir=$(dirname "$0")
-    if [ -f "${_mdir}/replies_${_cid}.json" ]; then
-      cat "${_mdir}/replies_${_cid}.json"
-    else
-      echo "[]"
-    fi
-    ;;
-REPLY_MOCK
-  printf '  *) exit 1 ;;\n' >> "$mock_dir/gh"
-  printf 'esac\n' >> "$mock_dir/gh"
-  chmod +x "$mock_dir/gh"
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo '[{"number":42}]' ;;
+      *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
+      *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
+      *"pulls/comments/"*"/replies"*)
+        local cid
+        cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
+        local var="_MOCK_REPLY_${cid}"
+        echo "${!var:-[]}"
+        ;;
+      *) exit 1 ;;
+    esac
+  }
 }
 
 run_script() {
-  PATH="$mock_dir:$ORIGINAL_PATH" bash "$script" "$@"
-}
-
-cleanup_mocks() {
-  rm -rf "$mock_dir"
+  export -f git gh
+  export _MOCK_PR_REVIEWS _MOCK_PR_ISSUES MOCK_HEAD_EPOCH MOCK_SHA_EPOCH KNOWN_SHA UNKNOWN_SHA
+  bash "$script" "$@"
 }
 
 test_names+=(
@@ -131,7 +123,6 @@ test_comments_empty_pr_no_output() {
   setup_mocks_with_pr '[]' '[]'
   local output
   output=$(run_script comments --pr 42 2>&1) || true
-  cleanup_mocks
   if [ -z "$output" ]; then
     pass=$((pass + 1))
   else
@@ -144,7 +135,6 @@ test_comments_review_only() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]' '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "review-comment" && echo "$output" | grep -qF "alice"; then
     pass=$((pass + 1))
   else
@@ -157,7 +147,6 @@ test_comments_issue_only() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"looks good"}]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "issue-comment" && echo "$output" | grep -qF "bob"; then
     pass=$((pass + 1))
   else
@@ -172,7 +161,6 @@ test_comments_sorted_by_date() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local first_author
   first_author=$(echo "$output" | grep -m1 "author:" | head -1 | sed 's/author: //')
   if [ "$first_author" = "bob" ]; then
@@ -187,7 +175,6 @@ test_comments_review_has_path_and_line() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":42,"body":"fix this"}]' '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -q "path: src/main.sh" && echo "$output" | grep -q "line: 42"; then
     pass=$((pass + 1))
   else
@@ -200,7 +187,6 @@ test_comments_issue_no_path_or_line() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"bob"},"created_at":"2025-01-01T10:00:00Z","body":"general comment"}]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -q "path:" || echo "$output" | grep -q "line:"; then
     fail=$((fail + 1))
     echo "FAIL: issue comment should not contain path or line fields"
@@ -213,7 +199,6 @@ test_comments_explicit_pr() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","body":"hello"}]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "alice"; then
     pass=$((pass + 1))
   else
@@ -225,14 +210,12 @@ test_comments_explicit_pr() {
 test_comments_exits_zero_on_success() {
   setup_mocks_with_pr '[]' '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","body":"ok"}]'
   assert_exit 0 "comments exits 0 on success" run_script comments --pr 42
-  cleanup_mocks
 }
 
 test_comments_multiline_body() {
   setup_mocks_with_pr '[{"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"line one\nline two"}]' '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "line one" && echo "$output" | grep -qF "line two"; then
     pass=$((pass + 1))
   else
@@ -246,7 +229,6 @@ test_comments_multiple_review_sorted() {
   setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local first_author
   first_author=$(echo "$output" | grep -m1 "author:" | head -1 | sed 's/author: //')
   if [ "$first_author" = "alice" ]; then
@@ -263,7 +245,6 @@ test_comments_review_with_replies() {
   setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF ">>> reply" \
     && echo "$output" | grep -qF "author: bob" \
     && echo "$output" | grep -qF "body: done, fixed" \
@@ -280,7 +261,6 @@ test_comments_review_no_replies() {
   setup_mocks_with_pr_and_replies "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "review-comment" && ! echo "$output" | grep -qF ">>> reply"; then
     pass=$((pass + 1))
   else
@@ -295,7 +275,6 @@ test_comments_mixed_replies() {
   setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local alice_block carol_block
   alice_block=$(echo "$output" | sed -n '/author: alice/,/^---/p')
   carol_block=$(echo "$output" | sed -n '/author: carol/,/^---/p')
@@ -315,7 +294,6 @@ test_comments_issue_stays_flat() {
   setup_mocks_with_pr_and_replies "$review_json" "$issue_json" "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local issue_block
   issue_block=$(echo "$output" | sed -n '/--- issue-comment/,/^---/p')
   if echo "$issue_block" | grep -qF "bob" \
@@ -333,7 +311,6 @@ test_comments_replies_sorted_under_parent() {
   setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local first_reply_author
   first_reply_author=$(echo "$output" | grep -A1 ">>> reply" | grep "author:" | head -1 | sed 's/.*author: //')
   if [ "$first_reply_author" = "bob" ]; then
@@ -350,7 +327,6 @@ test_comments_reply_in_main_response_not_duplicated() {
   setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   local reply_count
   reply_count=$(echo "$output" | grep -cF ">>> reply" || true)
   if [ "$reply_count" -eq 1 ]; then
@@ -367,7 +343,6 @@ test_since_last_commit_filters_old() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 --since last-commit 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol" \
     && ! echo "$output" | grep -qF "alice"; then
@@ -384,7 +359,6 @@ test_since_date_filters_old() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 --since 2025-06-01 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol" \
     && ! echo "$output" | grep -qF "alice"; then
@@ -401,7 +375,6 @@ test_since_datetime_filters_old() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 --since 2025-06-01T10:00:00 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol" \
     && ! echo "$output" | grep -qF "alice"; then
@@ -418,7 +391,6 @@ test_since_sha_filters_old() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 --since "$KNOWN_SHA" 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol" \
     && ! echo "$output" | grep -qF "alice"; then
@@ -435,7 +407,6 @@ test_since_no_filter_returns_all() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "alice" \
     && echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol"; then
@@ -452,7 +423,6 @@ test_since_all_overrides_since() {
   setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 --all --since 2025-12-01T00:00:00 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "alice" \
     && echo "$output" | grep -qF "bob" \
     && echo "$output" | grep -qF "carol"; then
@@ -468,7 +438,6 @@ test_since_last_commit_includes_equal() {
   setup_mocks_with_pr '[]' "$issue_json"
   local output
   output=$(run_script comments --pr 42 --since last-commit 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "alice"; then
     pass=$((pass + 1))
   else
@@ -483,7 +452,6 @@ test_since_filters_replies_too() {
   setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
   local output
   output=$(run_script comments --pr 42 --since 2025-06-01T00:00:00 2>&1)
-  cleanup_mocks
   if echo "$output" | grep -qF "carol" \
     && ! echo "$output" | grep -qF "old reply"; then
     pass=$((pass + 1))
@@ -497,7 +465,6 @@ test_since_unknown_sha_exits_nonzero() {
   setup_mocks_with_pr '[]' '[]'
   local exit_code=0
   run_script comments --pr 42 --since "$UNKNOWN_SHA" >/dev/null 2>&1 || exit_code=$?
-  cleanup_mocks
   if [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
@@ -510,7 +477,6 @@ test_since_unknown_sha_stderr_message() {
   setup_mocks_with_pr '[]' '[]'
   local output
   output=$(run_script comments --pr 42 --since "$UNKNOWN_SHA" 2>&1) || true
-  cleanup_mocks
   if echo "$output" | grep -qF "unknown commit"; then
     pass=$((pass + 1))
   else
