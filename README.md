@@ -111,15 +111,30 @@ conclusion: failure
 | `YYYY-MM-DD` | Comments on or after that date (UTC) |
 | `YYYY-MM-DDTHH:mm:ss` | Comments on or after that datetime (UTC) |
 
-## Agent Skill
+## Agent Skills
 
-An installable agent skill for LLM coding assistants is included in `skill/SKILL.md`. It provides a full QA & delivery review workflow that uses `gh-pr-context` to gather PR comments, CI status, and failed check logs before shipping.
+Skills for AI coding assistants that use `gh-pr-context`.
 
-To install into your agent's skills directory (run from the cloned repo root):
+### Install
 
 ```bash
-mkdir -p ~/.agents/skills/pr-qa-review && cp skill/SKILL.md ~/.agents/skills/pr-qa-review/SKILL.md
+npx skills@latest add akepo225/gh-pr-context
 ```
+
+Or manually copy the skill:
+
+```bash
+mkdir -p ~/.agents/skills/pr-qa-review
+cp skills/pr-qa-review/SKILL.md ~/.agents/skills/pr-qa-review/SKILL.md
+```
+
+Requires `gh-pr-context` on PATH — see [Install](#install) above.
+
+### Reference
+
+| Skill | Description |
+|---|---|
+| [pr-qa-review](skills/pr-qa-review/SKILL.md) | QA & delivery review workflow. Fetches PR comments, CI status, and failed check logs. Use when implementation is complete and ready for self-review, QA, or PR creation. |
 
 ## License
 
