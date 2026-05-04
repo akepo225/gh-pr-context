@@ -53,6 +53,7 @@ for test_file in "$script_dir"/test_*.sh; do
   for t in "${test_names[@]}"; do
     "$t"
   done
+  unset -f git gh 2>/dev/null || true
 done
 
 echo ""
