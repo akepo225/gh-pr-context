@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
 # setup_mocks defines mocked `git` and `gh` shell functions used by the test harness; `git` responds with fixed repo URL and branch values for known invocations and exits nonzero for others, while `gh` always exits nonzero.

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 # setup_mocks_base defines test mocks for `git` and `gh`; `git` returns fixed values for repository URL and branch name for specific queries, and `gh` exits nonzero for any invocation.
 setup_mocks_base() {
   git() {

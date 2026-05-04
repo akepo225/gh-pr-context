@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 HEAD_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 # setup_mocks_base defines mock `git` and `gh` functions for tests; the mock `git` returns a fixed repo URL for `remote get-url origin` and a fixed branch for `rev-parse --abbrev-ref HEAD`, while the mock `gh` exits with status 1 by default.

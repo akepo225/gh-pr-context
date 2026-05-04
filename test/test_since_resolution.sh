@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 KNOWN_SHA="cccccccccccccccccccccccccccccccccccccccc"
 UNKNOWN_SHA="dddddddddddddddddddddddddddddddddddddddd"
 

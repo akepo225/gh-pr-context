@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-PATH="$HOME/bin:$PATH"
-
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
 # setup_mocks sets up test mocks for `git` and `gh`: `git` returns a fixed repository URL or branch name for specific queries, and `gh` exits with status 1 by default.
