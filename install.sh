@@ -26,7 +26,8 @@ chmod +x "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to set executabl
 
 echo "installed $SCRIPT_NAME to $install_dir/$SCRIPT_NAME"
 
-if ! command -v "$SCRIPT_NAME" >/dev/null 2>&1; then
+resolved=$(command -v "$SCRIPT_NAME" 2>/dev/null) || true
+if [ "$resolved" != "$install_dir/$SCRIPT_NAME" ]; then
   echo "warning: $SCRIPT_NAME is not on your PATH" >&2
   echo "  Add it by running:" >&2
   echo "    export PATH=\"$install_dir:\$PATH\"" >&2

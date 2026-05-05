@@ -203,7 +203,7 @@ test_install_path_warning_when_not_on_path() {
   local mockdir="$tmpdir/mock-bin"
   setup_mock_curl "$mockdir" success
   local stderr
-  stderr=$(INSTALL_DIR="$custom" PATH="$mockdir:$PATH" bash "$install_script" 2>&1 >/dev/null) || true
+  stderr=$(INSTALL_DIR="$custom" PATH="$mockdir:/usr/bin:/bin" bash "$install_script" 2>&1 >/dev/null) || true
   if echo "$stderr" | grep -q "warning: gh-pr-context is not on your PATH"; then
     pass=$((pass + 1))
   else
@@ -221,7 +221,7 @@ test_install_no_path_warning_when_on_path() {
   local mockdir="$tmpdir/mock-bin"
   setup_mock_curl "$mockdir" success
   local stderr
-  stderr=$(INSTALL_DIR="$custom" PATH="$custom:$mockdir:$PATH" bash "$install_script" 2>&1 >/dev/null) || true
+  stderr=$(INSTALL_DIR="$custom" PATH="$custom:$mockdir:/usr/bin:/bin" bash "$install_script" 2>&1 >/dev/null) || true
   if echo "$stderr" | grep -q "warning: gh-pr-context is not on your PATH"; then
     fail=$((fail + 1))
     echo "FAIL: should not warn when install dir is on PATH (got: $stderr)"
