@@ -10,6 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version/tag consistency check
+        run: |
+          script_ver=$(grep '^version=' gh-pr-context | cut -d'"' -f2)
+          latest_tag=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$latest_tag" ]; then
+            tag_ver="${latest_tag#v}"
+            if [ "$script_ver" != "$tag_ver" ]; then
+              echo "::error::Version mismatch: script=$script_ver, latest_tag=$tag_ver"
+              echo "Bump the version in gh-pr-context to match the tag, or delete the tag."
+              exit 1
+            fi
+          fi
+          echo "Version check passed: $script_ver"
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq shellcheck
