@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -35,3 +36,26 @@ jobs:
 
       - name: Tests
         run: bash test/run.sh
+
+  version-check:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version matches tag
+        run: |
+          SCRIPT_VERSION=$(sed -n 's/^version="\([^"]*\)"/\1/p' gh-pr-context)
+          TAG_VERSION="${{ github.ref_name }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          echo "Script version: $SCRIPT_VERSION"
+          echo "Tag version:    $TAG_VERSION"
+          if [ -z "$SCRIPT_VERSION" ]; then
+            echo "::error::Could not extract version from gh-pr-context"
+            exit 1
+          fi
+          if [ "$SCRIPT_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Version mismatch: gh-pr-context reports '$SCRIPT_VERSION' but tag is '$TAG_VERSION'"
+            exit 1
+          fi
+          echo "Version check passed: $SCRIPT_VERSION == $TAG_VERSION"
