@@ -16,7 +16,7 @@ jobs:
       - name: Version/tag consistency check
         run: |
           script_ver=$(grep '^version=' gh-pr-context | cut -d'"' -f2)
-          latest_tag=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo "")
+          latest_tag=$(git tag --list 'v*' --sort=-v:refname | head -n1)
           if [ -n "$latest_tag" ]; then
             tag_ver="${latest_tag#v}"
             if [ "$script_ver" != "$tag_ver" ]; then
