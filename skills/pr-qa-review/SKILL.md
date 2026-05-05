@@ -17,6 +17,12 @@ Requires `gh-pr-context` on PATH. If missing, install:
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/v0.2.0/install.sh | bash
 ```
 
+Pin to a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=v0.2.0 bash
+```
+
 Verify: `gh-pr-context --help`. Requires `gh` (authenticated), `jq`, and `bash`.
 
 ## Workflow

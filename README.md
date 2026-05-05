@@ -26,6 +26,12 @@ Or use the `INSTALL_DIR` environment variable:
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | INSTALL_DIR=/usr/local/bin bash
 ```
 
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=v0.2.0 bash
+```
+
 ## Usage
 
 All commands auto-detect the PR from the current branch. Pass `--pr <number>` to target a specific PR.

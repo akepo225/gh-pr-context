@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REPO="akepo225/gh-pr-context"
-BRANCH="master"
+GH_PR_CONTEXT_VERSION="${GH_PR_CONTEXT_VERSION:-master}"
 SCRIPT_NAME="gh-pr-context"
-RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
+RAW_BASE="https://raw.githubusercontent.com/$REPO/$GH_PR_CONTEXT_VERSION"
 
 # die prints an error message to stderr and exits with status 1.
 die() {

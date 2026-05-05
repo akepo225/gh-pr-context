@@ -45,6 +45,8 @@ test_names+=(
   test_install_curl_failure_stderr
   test_install_path_warning_when_not_on_path
   test_install_no_path_warning_when_on_path
+  test_install_version_env_var
+  test_install_default_version_is_master
 )
 
 # test_install_default_dir verifies that running the installer with an empty INSTALL_DIR installs an executable `gh-pr-context` into `$HOME/.local/bin`.
@@ -227,6 +229,73 @@ test_install_no_path_warning_when_on_path() {
     echo "FAIL: should not warn when install dir is on PATH (got: $stderr)"
   else
     pass=$((pass + 1))
+  fi
+  cleanup_tmpdir "$tmpdir"
+}
+
+# setup_url_capturing_mock_curl creates a mock `curl` that records the URL argument to a file and writes a valid script to the -o target.
+setup_url_capturing_mock_curl() {
+  local mockdir="$1"
+  local urlfile="$2"
+  mkdir -p "$mockdir"
+  cat > "$mockdir/curl" << MOCK
+#!/usr/bin/env bash
+outfile=""
+url=""
+prev=""
+for arg in "\$@"; do
+  if [ "\$prev" = "-o" ]; then
+    outfile="\$arg"
+  fi
+  case "\$arg" in
+    http://*|https://*) url="\$arg" ;;
+  esac
+  prev="\$arg"
+done
+echo "\$url" > "$urlfile"
+if [ -n "\$outfile" ]; then
+  echo "#!/usr/bin/env bash" > "\$outfile"
+fi
+MOCK
+  chmod +x "$mockdir/curl"
+}
+
+# test_install_version_env_var verifies that setting GH_PR_CONTEXT_VERSION=v0.2.0 causes the installer to download from the v0.2.0 tag.
+test_install_version_env_var() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local custom="$tmpdir/bin"
+  local mockdir="$tmpdir/mock-bin"
+  local urlfile="$tmpdir/captured-url"
+  setup_url_capturing_mock_curl "$mockdir" "$urlfile"
+  INSTALL_DIR="$custom" GH_PR_CONTEXT_VERSION=v0.2.0 PATH="$mockdir:$PATH" bash "$install_script" >/dev/null 2>&1
+  local captured
+  captured=$(cat "$urlfile")
+  if echo "$captured" | grep -Fq "/v0.2.0/"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: version env var - URL should contain /v0.2.0/ (got: $captured)"
+  fi
+  cleanup_tmpdir "$tmpdir"
+}
+
+# test_install_default_version_is_master verifies that omitting GH_PR_CONTEXT_VERSION downloads from master.
+test_install_default_version_is_master() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local custom="$tmpdir/bin"
+  local mockdir="$tmpdir/mock-bin"
+  local urlfile="$tmpdir/captured-url"
+  setup_url_capturing_mock_curl "$mockdir" "$urlfile"
+  INSTALL_DIR="$custom" PATH="$mockdir:$PATH" bash "$install_script" >/dev/null 2>&1
+  local captured
+  captured=$(cat "$urlfile")
+  if echo "$captured" | grep -q "/master/"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: default version - URL should contain /master/ (got: $captured)"
   fi
   cleanup_tmpdir "$tmpdir"
 }
