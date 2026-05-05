@@ -29,6 +29,12 @@ curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/insta
 Install a specific version:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=<tag> bash
+```
+
+For example, to install `v0.2.0`:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=v0.2.0 bash
 ```
 

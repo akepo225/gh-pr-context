@@ -14,7 +14,7 @@ Run this workflow when implementation is complete, before shipping.
 Requires `gh-pr-context` on PATH. If missing, install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/v0.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | bash
 ```
 
 Pin to a specific version:
