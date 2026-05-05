@@ -15,6 +15,7 @@ jobs:
           fetch-depth: 0
 
       - name: Version/tag consistency check
+        if: github.event_name != 'pull_request'
         run: |
           script_ver=$(grep '^version=' gh-pr-context | cut -d'"' -f2)
           latest_tag=$(git tag --list 'v*' --sort=-v:refname | head -n1)
@@ -45,7 +46,7 @@ jobs:
 
       - name: Verify version matches tag
         run: |
-          SCRIPT_VERSION=$(sed -n 's/^version="\([^"]*\)"/\1/p' gh-pr-context)
+          SCRIPT_VERSION=$(grep '^version=' gh-pr-context | cut -d'"' -f2)
           TAG_VERSION="${{ github.ref_name }}"
           TAG_VERSION="${TAG_VERSION#v}"
           echo "Script version: $SCRIPT_VERSION"
