@@ -1,8 +1,8 @@
 ---
 name: pr-qa-review
-description: QA & delivery review workflow for PRs using gh-pr-context to fetch PR comments, CI status, and failed check logs. Use when implementation is complete and ready for self-review, QA, and PR creation. Triggers: "qa review", "delivery review", "ready to ship", "self-review", "create PR", "review my changes".
-compatibility: Requires gh-pr-context on PATH, gh (authenticated), jq, and bash
-allowed-tools: Bash(gh-pr-context:*) Bash(gh:*) Bash(jq:*) Bash(git:*)
+description: 'QA & delivery review workflow for PRs using gh-pr-context to fetch PR comments, CI status, and failed check logs. Use when implementation is complete and ready for self-review, QA, and PR creation. Triggers: "qa review", "delivery review", "ready to ship", "self-review", "create PR", "review my changes".'
+compatibility: 'Requires gh-pr-context on PATH, gh (authenticated), jq, and bash'
+allowed-tools: 'Bash(gh-pr-context:*) Bash(gh:*) Bash(jq:*) Bash(git:*)'
 ---
 
 # PR QA & Delivery Review
