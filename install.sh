@@ -4,13 +4,18 @@ set -euo pipefail
 REPO="akepo225/gh-pr-context"
 GH_PR_CONTEXT_VERSION="${GH_PR_CONTEXT_VERSION:-master}"
 SCRIPT_NAME="gh-pr-context"
-RAW_BASE="https://raw.githubusercontent.com/$REPO/$GH_PR_CONTEXT_VERSION"
 
 # die prints an error message to stderr and exits with status 1.
 die() {
   echo "error: $1" >&2
   exit 1
 }
+
+if [[ ! "$GH_PR_CONTEXT_VERSION" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  die "invalid GH_PR_CONTEXT_VERSION: $GH_PR_CONTEXT_VERSION"
+fi
+
+RAW_BASE="https://raw.githubusercontent.com/$REPO/$GH_PR_CONTEXT_VERSION"
 
 install_dir="${INSTALL_DIR:-${1:-$HOME/.local/bin}}"
 
@@ -27,7 +32,7 @@ chmod +x "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to set executabl
 echo "installed $SCRIPT_NAME to $install_dir/$SCRIPT_NAME"
 
 resolved=$(command -v "$SCRIPT_NAME" 2>/dev/null) || true
-if [ "$resolved" != "$install_dir/$SCRIPT_NAME" ]; then
+if [ -z "$resolved" ]; then
   echo "warning: $SCRIPT_NAME is not on your PATH" >&2
   echo "  Add it by running:" >&2
   echo "    export PATH=\"$install_dir:\$PATH\"" >&2

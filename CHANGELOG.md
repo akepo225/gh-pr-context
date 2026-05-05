@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.0
+
+- **GH_PR_CONTEXT_VERSION** — Install a specific version by setting the env var (e.g., `GH_PR_CONTEXT_VERSION=v0.2.0`).
+- **PATH warning** — Post-install check warns if `gh-pr-context` is not on PATH.
+- **CI version gate** — Automated check that script version matches the latest git tag.
+- **Windows CRLF fix** — Strip `\r` from `jq` output to prevent corrupted API URLs on Windows/Git Bash.
+
 ## v0.1.0
 
 Initial release.

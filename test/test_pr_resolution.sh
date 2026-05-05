@@ -207,7 +207,7 @@ test_pr_resolution_api_fail_stderr_message() {
   setup_mocks_api_fail
   local output
   output=$(run_script comments 2>&1) || true
-  if echo "$output" | grep -qiF "failed"; then
+  if echo "$output" | grep -qF "failed"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
