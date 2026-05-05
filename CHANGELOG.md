@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.1
+
+- **SKILL.md YAML fix** — Quote frontmatter values to prevent YAML parsing errors with colons in descriptions.
+
+## v0.2.0
+
+- **pr-qa-review skill** — Agent skill for QA & delivery review workflow using gh-pr-context to fetch PR comments, CI status, and failed check logs.
+- **Agent skills framework** — SKILL.md format with frontmatter for name, description, compatibility, and allowed-tools.
+- **`--version` flag** — Show version information.
+- **Date validation** — Round-trip date check for Linux compatibility.
+- **Test refactor** — Shell function overrides replacing PATH injection for better test isolation.
+- **Error handling** — Improved 404 handling for reply threads.
+- **CI version check** — Validate script version matches the latest git tag.
+
 ## v0.1.0
 
 Initial release.
