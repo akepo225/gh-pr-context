@@ -43,6 +43,8 @@ test_names+=(
   test_install_curl_failure_exits_nonzero
   test_install_success_message
   test_install_curl_failure_stderr
+  test_install_path_warning_when_not_on_path
+  test_install_no_path_warning_when_on_path
 )
 
 # test_install_default_dir verifies that running the installer with an empty INSTALL_DIR installs an executable `gh-pr-context` into `$HOME/.local/bin`.
@@ -189,6 +191,42 @@ test_install_curl_failure_stderr() {
   else
     fail=$((fail + 1))
     echo "FAIL: curl failure should output error to stderr (got: $stderr)"
+  fi
+  cleanup_tmpdir "$tmpdir"
+}
+
+# test_install_path_warning_when_not_on_path verifies the installer warns when the install directory is not on PATH.
+test_install_path_warning_when_not_on_path() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local custom="$tmpdir/bin"
+  local mockdir="$tmpdir/mock-bin"
+  setup_mock_curl "$mockdir" success
+  local stderr
+  stderr=$(INSTALL_DIR="$custom" PATH="$mockdir:$PATH" bash "$install_script" 2>&1 >/dev/null) || true
+  if echo "$stderr" | grep -q "warning: gh-pr-context is not on your PATH"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: should warn when install dir is not on PATH (got: $stderr)"
+  fi
+  cleanup_tmpdir "$tmpdir"
+}
+
+# test_install_no_path_warning_when_on_path verifies no warning is printed when the install directory is on PATH.
+test_install_no_path_warning_when_on_path() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local custom="$tmpdir/bin"
+  local mockdir="$tmpdir/mock-bin"
+  setup_mock_curl "$mockdir" success
+  local stderr
+  stderr=$(INSTALL_DIR="$custom" PATH="$custom:$mockdir:$PATH" bash "$install_script" 2>&1 >/dev/null) || true
+  if echo "$stderr" | grep -q "warning: gh-pr-context is not on your PATH"; then
+    fail=$((fail + 1))
+    echo "FAIL: should not warn when install dir is on PATH (got: $stderr)"
+  else
+    pass=$((pass + 1))
   fi
   cleanup_tmpdir "$tmpdir"
 }

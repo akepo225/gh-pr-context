@@ -25,3 +25,9 @@ mv "$tmp" "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to write to $in
 chmod +x "$install_dir/$SCRIPT_NAME" 2>/dev/null || die "failed to set executable permissions on $install_dir/$SCRIPT_NAME"
 
 echo "installed $SCRIPT_NAME to $install_dir/$SCRIPT_NAME"
+
+if ! command -v "$SCRIPT_NAME" >/dev/null 2>&1; then
+  echo "warning: $SCRIPT_NAME is not on your PATH" >&2
+  echo "  Add it by running:" >&2
+  echo "    export PATH=\"$install_dir:\$PATH\"" >&2
+fi
