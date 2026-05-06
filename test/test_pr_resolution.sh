@@ -4,6 +4,7 @@
 setup_mocks_base() {
   git() {
     case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
       *) exit 1 ;;
