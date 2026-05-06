@@ -122,6 +122,7 @@ test_names+=(
   test_since_filters_replies_too
   test_since_unknown_sha_exits_nonzero
   test_since_unknown_sha_stderr_message
+  test_comments_crlf_in_review_ids
 )
 
 # test_comments_empty_pr_no_output verifies that invoking `comments --pr 42` against a PR with no review or issue comments produces no output.
@@ -513,5 +514,67 @@ test_since_unknown_sha_stderr_message() {
   else
     fail=$((fail + 1))
     echo "FAIL: --since with unknown SHA should mention unknown commit (output: $output)"
+  fi
+}
+
+# test_comments_crlf_in_review_ids verifies that reply fetching works correctly when jq produces Windows-style CRLF output, which leaves trailing \r on comment IDs without the tr -d '\r' strip in cmd_comments.
+test_comments_crlf_in_review_ids() {
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
+  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
+  local issue_json='[]'
+
+  _MOCK_PR_REVIEWS="$review_json"
+  _MOCK_PR_ISSUES="$issue_json"
+
+  setup_mocks
+  _clear_reply_vars
+  export "_MOCK_REPLY_101=$replies_data"
+  _MOCK_REPLY_IDS="101"
+
+  gh() {
+    case "$*" in
+      *"pulls?head=acme:feature-branch"*) echo '[{"number":42}]' ;;
+      *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
+      *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
+      *"pulls/comments/"*"/replies"*)
+        if ! echo "$*" | grep -qP 'pulls/comments/\d+/replies'; then
+          echo 'parse error: invalid control character in URL' >&2
+          exit 1
+        fi
+        local cid
+        cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
+        local var="_MOCK_REPLY_${cid}"
+        echo "${!var:-[]}"
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+
+  # Create a jq wrapper that appends \r to each line of raw output (-r flag),
+  # simulating Windows jq CRLF behavior. Non-raw jq calls pass through unchanged.
+  local tmpdir real_jq
+  real_jq=$(which jq)
+  tmpdir=$(mktemp -d)
+  cat > "$tmpdir/jq" << WRAPPER
+#!/usr/bin/env bash
+if [[ "\$*" == *"-r"* ]]; then
+  $real_jq "\$@" | while IFS= read -r line; do printf '%s\r\n' "\$line"; done
+else
+  $real_jq "\$@"
+fi
+WRAPPER
+  chmod +x "$tmpdir/jq"
+
+  local output exit_code=0
+  output=$(PATH="$tmpdir:$PATH" run_script comments --pr 42 2>&1) || exit_code=$?
+  rm -rf "$tmpdir"
+  if [ "$exit_code" -eq 0 ] \
+    && echo "$output" | grep -qF ">>> reply" \
+    && echo "$output" | grep -qF "author: bob" \
+    && echo "$output" | grep -qF "body: done, fixed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: CRLF in review IDs should not break reply fetching (exit=$exit_code, output: $output)"
   fi
 }
