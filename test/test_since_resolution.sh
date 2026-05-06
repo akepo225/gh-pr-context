@@ -10,6 +10,7 @@ SHA_EPOCH="1751587200"
 setup_mocks() {
   git() {
     case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
       "log -1 --format=%ct HEAD") echo "$HEAD_EPOCH" ;;

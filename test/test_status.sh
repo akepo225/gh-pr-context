@@ -6,6 +6,7 @@ HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 setup_mocks() {
   git() {
     case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "branch --show-current") echo "feature-branch" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
