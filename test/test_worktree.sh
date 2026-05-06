@@ -72,12 +72,12 @@ test_worktree_broken_path_returns_nonzero() {
   tmpdir=$(mktemp -d)
   echo "gitdir: /nonexistent/path/.git/worktrees/broken" > "$tmpdir/.git"
 
+  local rc=0
   (
     cd "$tmpdir"
     eval "$(sed -n '/^setup_git_env()/,/^}/p' "$script")"
     setup_git_env
-  ) 2>/dev/null
-  local rc=$?
+  ) 2>/dev/null || rc=$?
   if [ "$rc" -ne 0 ]; then
     pass=$((pass + 1))
   else
