@@ -8,7 +8,44 @@ die() {
   exit 1
 }
 
+setup_git_env() {
+  git rev-parse --git-dir >/dev/null 2>&1 && return 0
+
+  [ -f ".git" ] || return 1
+  local gitdir_path
+  gitdir_path=$(sed -n 's/^gitdir: //p' .git 2>/dev/null)
+  [ -n "$gitdir_path" ] || return 1
+
+  # Windows absolute path (e.g. C:/...) → WSL /mnt/c/...
+  if [[ "$gitdir_path" =~ ^([A-Za-z]):(/.*)$ ]]; then
+    local drive="${BASH_REMATCH[1],,}"
+    local rest="${BASH_REMATCH[2]}"
+    local resolved="/mnt/${drive}${rest}"
+    if [ -d "$resolved" ]; then
+      export GIT_DIR="$resolved"
+      export GIT_WORK_TREE="$(pwd)"
+      git rev-parse --git-dir >/dev/null 2>&1 && return 0
+      unset GIT_DIR GIT_WORK_TREE
+    fi
+  fi
+
+  # Non-absolute path → resolve relative to cwd
+  if [[ "$gitdir_path" != /* ]]; then
+    local abs_path
+    abs_path="$(cd -- "$(dirname "$gitdir_path")" 2>/dev/null && pwd)/$(basename "$gitdir_path")"
+    if [ -d "$abs_path" ]; then
+      export GIT_DIR="$abs_path"
+      export GIT_WORK_TREE="$(pwd)"
+      git rev-parse --git-dir >/dev/null 2>&1 && return 0
+      unset GIT_DIR GIT_WORK_TREE
+    fi
+  fi
+
+  return 1
+}
+
 check_deps() {
+  setup_git_env || die "not a git repository (or worktree path could not be resolved)"
   for cmd in gh jq git; do
     command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required but not found on PATH"
   done
