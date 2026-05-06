@@ -311,12 +311,15 @@ test_since_short_sha_format_is_iso8601() {
   fi
 }
 
-# test_since_short_sha_unknown_exits_nonzero verifies that an unknown 7-char SHA exits non-zero.
+# test_since_short_sha_unknown_exits_nonzero verifies that an unknown 7-char SHA exits non-zero (and not due to timeout).
 test_since_short_sha_unknown_exits_nonzero() {
   setup_mocks
   local exit_code=0
   run_script comments --pr 42 --since "$UNKNOWN_SHORT_SHA" >/dev/null 2>&1 || exit_code=$?
-  if [ "$exit_code" -ne 0 ]; then
+  if [ "$exit_code" -eq 124 ]; then
+    fail=$((fail + 1))
+    echo "FAIL: test timed out (possible hang)"
+  elif [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -394,7 +397,7 @@ test_since_api_fallback_format_is_iso8601() {
   fi
 }
 
-# test_since_api_failure_exits_nonzero verifies that when both git log and gh api fail, the command exits non-zero.
+# test_since_api_failure_exits_nonzero verifies that when both git log and gh api fail, the command exits non-zero (and not due to timeout).
 test_since_api_failure_exits_nonzero() {
   setup_mocks
   gh() {
@@ -408,7 +411,10 @@ test_since_api_failure_exits_nonzero() {
   }
   local exit_code=0
   run_script comments --pr 42 --since "$API_SHA" >/dev/null 2>&1 || exit_code=$?
-  if [ "$exit_code" -ne 0 ]; then
+  if [ "$exit_code" -eq 124 ]; then
+    fail=$((fail + 1))
+    echo "FAIL: test timed out (possible hang)"
+  elif [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
