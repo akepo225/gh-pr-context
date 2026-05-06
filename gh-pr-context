@@ -119,19 +119,22 @@ resolve_since_timestamp() {
   fi
   if echo "$since_input" | grep -qE '^[0-9a-fA-F]{7,40}$'; then
     local expanded_sha
-    expanded_sha=$(git rev-parse "$since_input" 2>/dev/null) || die "ambiguous or unknown SHA: $since_input"
-    local epoch
-    if epoch=$(git log -1 --format=%ct "$expanded_sha" 2>/dev/null); then
-      echo "$epoch" | jq -Rr 'tonumber | todate'
-    else
-      local owner_repo
-      owner_repo=$(resolve_owner_repo) || die "unknown commit: $since_input"
-      local api_date
-      api_date=$(gh api "repos/$owner_repo/commits/$expanded_sha" --jq '.commit.committer.date' 2>/dev/null | tr -d '\r') \
-        || die "unknown commit: $since_input"
-      echo "$api_date" | jq -Rr 'fromdateiso8601 | todateiso8601' 2>/dev/null \
-        || die "unknown commit: $since_input"
+    expanded_sha=$(git rev-parse "$since_input" 2>/dev/null) || true
+    if [ -n "$expanded_sha" ]; then
+      local epoch
+      if epoch=$(git log -1 --format=%ct "$expanded_sha" 2>/dev/null); then
+        echo "$epoch" | jq -Rr 'tonumber | todate'
+        return
+      fi
     fi
+    local sha_for_api="${expanded_sha:-$since_input}"
+    local owner_repo
+    owner_repo=$(resolve_owner_repo) || die "unknown commit: $since_input"
+    local api_date
+    api_date=$(gh api "repos/$owner_repo/commits/$sha_for_api" --jq '.commit.committer.date' 2>/dev/null | tr -d '\r') \
+      || die "unknown commit: $since_input"
+    echo "$api_date" | jq -Rr 'fromdateiso8601 | todateiso8601' 2>/dev/null \
+      || die "unknown commit: $since_input"
     return
   fi
   if echo "$since_input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
