@@ -12,11 +12,14 @@ setup_git_env() {
   (git rev-parse --git-dir >/dev/null 2>&1) && return 0
 
   # Only attempt fixup in worktree scenarios (.git is a file, not a dir).
-  # If .git is a directory or absent, return 0 and let normal error
-  # handling deal with any git failures.
-  [ -f ".git" ] || return 0
+  # Walk up to find the worktree root where .git is a file.
+  local work_tree="$PWD"
+  while [ "$work_tree" != "/" ] && [ ! -f "$work_tree/.git" ]; do
+    work_tree="$(dirname "$work_tree")"
+  done
+  [ -f "$work_tree/.git" ] || return 0
   local gitdir_path
-  gitdir_path=$(sed -n 's/^gitdir: //p' .git 2>/dev/null)
+  gitdir_path=$(sed -n 's/^gitdir: //p' "$work_tree/.git" 2>/dev/null)
   [ -n "$gitdir_path" ] || return 1
 
   # Windows absolute path (e.g. C:/...) → WSL /mnt/c/...
@@ -26,20 +29,20 @@ setup_git_env() {
     local resolved="/mnt/${drive}${rest}"
     if [ -d "$resolved" ]; then
       GIT_DIR="$resolved"
-      GIT_WORK_TREE="$(pwd)"
+      GIT_WORK_TREE="$work_tree"
       export GIT_DIR GIT_WORK_TREE
       (git rev-parse --git-dir >/dev/null 2>&1) && return 0
       unset GIT_DIR GIT_WORK_TREE
     fi
   fi
 
-  # Non-absolute path → resolve relative to cwd
+  # Non-absolute path → resolve relative to worktree root
   if [[ "$gitdir_path" != /* ]]; then
     local abs_path
-    abs_path="$(cd -- "$(dirname "$gitdir_path")" 2>/dev/null && pwd)/$(basename "$gitdir_path")"
+    abs_path="$(cd -- "$work_tree" && cd -- "$(dirname "$gitdir_path")" 2>/dev/null && pwd)/$(basename "$gitdir_path")"
     if [ -d "$abs_path" ]; then
       GIT_DIR="$abs_path"
-      GIT_WORK_TREE="$(pwd)"
+      GIT_WORK_TREE="$work_tree"
       export GIT_DIR GIT_WORK_TREE
       (git rev-parse --git-dir >/dev/null 2>&1) && return 0
       unset GIT_DIR GIT_WORK_TREE
