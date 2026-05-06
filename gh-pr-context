@@ -53,10 +53,10 @@ setup_git_env() {
 }
 
 check_deps() {
-  setup_git_env || die "not a git repository (or worktree path could not be resolved)"
   for cmd in gh jq git; do
     command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required but not found on PATH"
   done
+  setup_git_env || die "not a git repository (or worktree path could not be resolved)"
 }
 
 usage() {
