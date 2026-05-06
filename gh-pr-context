@@ -17,7 +17,7 @@ setup_git_env() {
   while [ "$work_tree" != "/" ] && [ ! -f "$work_tree/.git" ]; do
     work_tree="$(dirname "$work_tree")"
   done
-  [ -f "$work_tree/.git" ] || return 0
+  [ -f "$work_tree/.git" ] || return 1
   local gitdir_path
   gitdir_path=$(sed -n 's/^gitdir: //p' "$work_tree/.git" 2>/dev/null)
   [ -n "$gitdir_path" ] || return 1
