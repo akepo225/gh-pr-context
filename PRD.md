@@ -40,7 +40,7 @@ The tool is a single bash script. Internally, it is organized into the following
 3. **`--since` Resolution Module** — Parses the `--since` flag value into an ISO 8601 timestamp used for filtering. Handles five cases:
    - Omitted → no filter (return all)
    - `last-commit` → resolve HEAD commit timestamp via `git log`
-   - 40-char hex SHA → resolve that commit's timestamp via `git log`
+   - 7-40 char hex SHA → resolve that commit's timestamp via `git log`, with GitHub API fallback
    - `YYYY-MM-DD` → treat as `YYYY-MM-DDT00:00:00Z`
    - `YYYY-MM-DDTHH:mm:ss` → treat as UTC
 

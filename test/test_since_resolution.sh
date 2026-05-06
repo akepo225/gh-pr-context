@@ -2,6 +2,11 @@
 
 KNOWN_SHA="cccccccccccccccccccccccccccccccccccccccc"
 UNKNOWN_SHA="dddddddddddddddddddddddddddddddddddddddd"
+SHORT_SHA="ccccccc"
+UNKNOWN_SHORT_SHA="ddddddd"
+API_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+API_SHA_SHORT="eeeeeee"
+API_DATE="2025-07-04T12:00:00Z"
 
 HEAD_EPOCH="1742040000"
 SHA_EPOCH="1751587200"
@@ -13,9 +18,16 @@ setup_mocks() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
+      "rev-parse $KNOWN_SHA") echo "$KNOWN_SHA" ;;
+      "rev-parse $SHORT_SHA") echo "$KNOWN_SHA" ;;
+      "rev-parse $UNKNOWN_SHA") echo "$UNKNOWN_SHA" ;;
+      "rev-parse $UNKNOWN_SHORT_SHA") exit 1 ;;
+      "rev-parse $API_SHA") echo "$API_SHA" ;;
+      "rev-parse $API_SHA_SHORT") echo "$API_SHA" ;;
       "log -1 --format=%ct HEAD") echo "$HEAD_EPOCH" ;;
       "log -1 --format=%ct $KNOWN_SHA") echo "$SHA_EPOCH" ;;
       "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
+      "log -1 --format=%ct $API_SHA") exit 1 ;;
       *) exit 1 ;;
     esac
   }
@@ -24,6 +36,7 @@ setup_mocks() {
       *"pulls/42/comments"*) echo '[]' ;;
       *"issues/42/comments"*) echo '[]' ;;
       *"pulls/comments/42/replies"*) echo '[]' ;;
+      *commits/eeee*) echo '2025-07-04T12:00:00Z' ;;
       *) exit 1 ;;
     esac
   }
@@ -32,8 +45,8 @@ setup_mocks() {
 # run_script exports the mocked `git` and `gh` functions and related SHA/epoch variables, then executes the target script with the provided arguments and propagates its exit status.
 run_script() {
   export -f git gh
-  export KNOWN_SHA UNKNOWN_SHA HEAD_EPOCH SHA_EPOCH
-  bash "$script" "$@"
+  export KNOWN_SHA UNKNOWN_SHA SHORT_SHA UNKNOWN_SHORT_SHA API_SHA API_SHA_SHORT API_DATE HEAD_EPOCH SHA_EPOCH
+  timeout 15 bash "$script" "$@" </dev/null
 }
 
 test_names+=(
@@ -42,6 +55,14 @@ test_names+=(
   test_since_last_commit_format_is_iso8601
   test_since_known_sha_exits_zero
   test_since_known_sha_format_is_iso8601
+  test_since_short_sha_resolves_via_rev_parse
+  test_since_short_sha_format_is_iso8601
+  test_since_short_sha_unknown_exits_nonzero
+  test_since_short_sha_unknown_stderr_mentions_sha
+  test_since_api_fallback_exits_zero
+  test_since_api_fallback_format_is_iso8601
+  test_since_api_failure_exits_nonzero
+  test_since_api_failure_stderr_mentions_unknown_commit
   test_since_date_only_exits_zero
   test_since_date_only_appends_midnight_utc
   test_since_datetime_exits_zero
@@ -53,7 +74,6 @@ test_names+=(
   test_since_invalid_month_exits_nonzero
   test_since_invalid_day_exits_nonzero
   test_since_invalid_hour_exits_nonzero
-  test_since_short_sha_treated_as_invalid
 )
 
 # test_since_empty_resolves_to_empty verifies that invoking the comments command without a `--since` value exits with status 0.
@@ -256,8 +276,141 @@ test_since_invalid_hour_exits_nonzero() {
   assert_exit 1 "--since with hour 25 exits non-zero" bash "$script" comments --pr 42 --since "2025-01-01T25:00:00"
 }
 
-# test_since_short_sha_treated_as_invalid verifies that passing a 7-character SHA to `--since` causes the script to exit with code 1 and emits "invalid --since value" on stderr.
-test_since_short_sha_treated_as_invalid() {
-  assert_exit 1 "--since with 7-char sha exits non-zero" bash "$script" comments --pr 42 --since "abc1234"
-  assert_stderr_contains "--since 7-char sha emits invalid error" "invalid --since value" bash "$script" comments --pr 42 --since "abc1234"
+# test_since_short_sha_resolves_via_rev_parse verifies that a 7-char SHA matching a known commit resolves successfully.
+test_since_short_sha_resolves_via_rev_parse() {
+  setup_mocks
+  local exit_code=0
+  run_script comments --pr 42 --since "$SHORT_SHA" >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <7-char sha> should exit 0 (exit: $exit_code)"
+  fi
+}
+
+# test_since_short_sha_format_is_iso8601 verifies that a short SHA produces a valid ISO-8601 timestamp that allows future comments through.
+test_since_short_sha_format_is_iso8601() {
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42/comments"*) echo '[]' ;;
+      *"issues/42/comments"*) echo '[{"user":{"login":"bot"},"created_at":"2099-01-01T00:00:00Z","body":"future-short"}]' ;;
+      *"pulls/comments/42/replies"*) echo '[]' ;;
+      *) exit 1 ;;
+    esac
+  }
+  local output exit_code=0
+  output=$(run_script comments --pr 42 --since "$SHORT_SHA" 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 0 ] && echo "$output" | grep -qF "future-short"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <short-sha> timestamp should be valid ISO-8601 (exit: $exit_code, output: $output)"
+  fi
+}
+
+# test_since_short_sha_unknown_exits_nonzero verifies that an unknown 7-char SHA exits non-zero.
+test_since_short_sha_unknown_exits_nonzero() {
+  setup_mocks
+  local exit_code=0
+  run_script comments --pr 42 --since "$UNKNOWN_SHORT_SHA" >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -ne 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <unknown-7-char-sha> should exit non-zero"
+  fi
+}
+
+# test_since_short_sha_unknown_stderr_mentions_sha verifies that a failed short SHA resolution mentions "ambiguous or unknown SHA".
+test_since_short_sha_unknown_stderr_mentions_sha() {
+  setup_mocks
+  local output
+  output=$(run_script comments --pr 42 --since "$UNKNOWN_SHORT_SHA" 2>&1) || true
+  if echo "$output" | grep -qF "ambiguous or unknown SHA"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <unknown-7-char-sha> should mention 'ambiguous or unknown SHA' (output: $output)"
+  fi
+}
+
+# test_since_api_fallback_exits_zero verifies that when git rev-parse succeeds but git log fails, the GitHub API fallback is used and the command exits 0.
+test_since_api_fallback_exits_zero() {
+  setup_mocks
+  local exit_code=0
+  run_script comments --pr 42 --since "$API_SHA" >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <api-only-sha> should exit 0 via API fallback (exit: $exit_code)"
+  fi
+}
+
+# test_since_api_fallback_format_is_iso8601 verifies the API fallback produces a valid ISO-8601 timestamp by checking that a comment with a future created_at passes the filter.
+test_since_api_fallback_format_is_iso8601() {
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42/comments"*) echo '[]' ;;
+      *"issues/42/comments"*) echo '[{"user":{"login":"bot"},"created_at":"2099-01-01T00:00:00Z","body":"future-api"}]' ;;
+      *"pulls/comments/42/replies"*) echo '[]' ;;
+      *commits/eeee*) echo '2025-07-04T12:00:00Z' ;;
+      *) exit 1 ;;
+    esac
+  }
+  local output exit_code=0
+  output=$(run_script comments --pr 42 --since "$API_SHA" 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 0 ] && echo "$output" | grep -qF "future-api"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: API fallback timestamp should be valid ISO-8601 and allow future comments through (exit: $exit_code, output: $output)"
+  fi
+}
+
+# test_since_api_failure_exits_nonzero verifies that when both git log and gh api fail, the command exits non-zero.
+test_since_api_failure_exits_nonzero() {
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42/comments"*) echo '[]' ;;
+      *"issues/42/comments"*) echo '[]' ;;
+      *"pulls/comments/42/replies"*) echo '[]' ;;
+      *"commits/"*) exit 1 ;;
+      *) exit 1 ;;
+    esac
+  }
+  local exit_code=0
+  run_script comments --pr 42 --since "$API_SHA" >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -ne 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <sha> should exit non-zero when both git log and API fail"
+  fi
+}
+
+# test_since_api_failure_stderr_mentions_unknown_commit verifies that when both local and API resolution fail, stderr mentions "unknown commit".
+test_since_api_failure_stderr_mentions_unknown_commit() {
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42/comments"*) echo '[]' ;;
+      *"issues/42/comments"*) echo '[]' ;;
+      *"pulls/comments/42/replies"*) echo '[]' ;;
+      *"commits/"*) exit 1 ;;
+      *) exit 1 ;;
+    esac
+  }
+  local output
+  output=$(run_script comments --pr 42 --since "$API_SHA" 2>&1) || true
+  if echo "$output" | grep -qF "unknown commit"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: API failure should mention 'unknown commit' (output: $output)"
+  fi
 }

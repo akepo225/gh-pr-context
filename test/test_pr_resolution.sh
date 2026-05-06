@@ -70,7 +70,7 @@ setup_mocks_api_fail() {
 run_script() {
   export -f git gh
   export _MOCK_HEAD_SHA
-  bash "$script" "$@"
+  timeout 15 bash "$script" "$@" </dev/null
 }
 
 test_names+=(

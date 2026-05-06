@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Short SHA support** — `--since` now accepts 7-40 character hex SHAs (previously only 40-character SHAs).
+- **GitHub API fallback** — When a commit is not available locally, `--since` falls back to the GitHub API to resolve the timestamp.
+
 ## v0.2.0
 
 - **GH_PR_CONTEXT_VERSION** — Install a specific version by setting the env var (e.g., `GH_PR_CONTEXT_VERSION=v0.2.0`).
