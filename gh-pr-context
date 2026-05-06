@@ -11,7 +11,10 @@ die() {
 setup_git_env() {
   git rev-parse --git-dir >/dev/null 2>&1 && return 0
 
-  [ -f ".git" ] || return 1
+  # Only attempt fixup in worktree scenarios (.git is a file, not a dir).
+  # If .git is a directory or absent, return 0 and let normal error
+  # handling deal with any git failures.
+  [ -f ".git" ] || return 0
   local gitdir_path
   gitdir_path=$(sed -n 's/^gitdir: //p' .git 2>/dev/null)
   [ -n "$gitdir_path" ] || return 1
