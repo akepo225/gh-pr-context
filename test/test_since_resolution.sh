@@ -61,6 +61,7 @@ test_names+=(
   test_since_short_sha_unknown_stderr_mentions_sha
   test_since_api_fallback_exits_zero
   test_since_api_fallback_rev_parse_fails_exits_zero
+  test_since_api_fallback_rev_parse_full_sha_fails_exits_zero
   test_since_api_fallback_format_is_iso8601
   test_since_api_failure_exits_nonzero
   test_since_api_failure_stderr_mentions_unknown_commit
@@ -333,9 +334,12 @@ test_since_short_sha_unknown_exits_nonzero() {
 # test_since_short_sha_unknown_stderr_mentions_sha verifies that a failed short SHA resolution (both rev-parse and API fail) mentions "unknown commit".
 test_since_short_sha_unknown_stderr_mentions_sha() {
   setup_mocks
-  local output
-  output=$(run_script comments --pr 42 --since "$UNKNOWN_SHORT_SHA" 2>&1) || true
-  if echo "$output" | grep -qF "unknown commit"; then
+  local exit_code=0 output
+  output=$(run_script comments --pr 42 --since "$UNKNOWN_SHORT_SHA" 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 124 ]; then
+    fail=$((fail + 1))
+    echo "FAIL: test timed out (possible hang)"
+  elif echo "$output" | grep -qF "unknown commit"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -375,6 +379,28 @@ test_since_api_fallback_rev_parse_fails_exits_zero() {
   else
     fail=$((fail + 1))
     echo "FAIL: --since <short-sha-not-in-local> should exit 0 via API fallback (exit: $exit_code)"
+  fi
+}
+
+# test_since_api_fallback_rev_parse_full_sha_fails_exits_zero verifies that a full 40-char SHA not present locally (rev-parse fails) falls back to the GitHub API and exits 0.
+test_since_api_fallback_rev_parse_full_sha_fails_exits_zero() {
+  setup_mocks
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
+      "rev-parse $API_SHA") exit 1 ;;
+      *) exit 1 ;;
+    esac
+  }
+  local exit_code=0
+  run_script comments --pr 42 --since "$API_SHA" >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --since <full-sha-not-in-local> should exit 0 via API fallback (exit: $exit_code)"
   fi
 }
 
@@ -437,9 +463,12 @@ test_since_api_failure_stderr_mentions_unknown_commit() {
       *) exit 1 ;;
     esac
   }
-  local output
-  output=$(run_script comments --pr 42 --since "$API_SHA" 2>&1) || true
-  if echo "$output" | grep -qF "unknown commit"; then
+  local exit_code=0 output
+  output=$(run_script comments --pr 42 --since "$API_SHA" 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 124 ]; then
+    fail=$((fail + 1))
+    echo "FAIL: test timed out (possible hang)"
+  elif echo "$output" | grep -qF "unknown commit"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
