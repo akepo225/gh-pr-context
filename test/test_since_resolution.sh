@@ -226,12 +226,15 @@ test_since_datetime_appends_z() {
   fi
 }
 
-# test_since_unknown_sha_exits_nonzero verifies that running the script with --since set to an unknown commit SHA results in a non-zero exit status.
+# test_since_unknown_sha_exits_nonzero verifies that running the script with --since set to an unknown commit SHA results in a non-zero exit status (and not due to timeout).
 test_since_unknown_sha_exits_nonzero() {
   setup_mocks
   local exit_code=0
   run_script comments --pr 42 --since "$UNKNOWN_SHA" >/dev/null 2>&1 || exit_code=$?
-  if [ "$exit_code" -ne 0 ]; then
+  if [ "$exit_code" -eq 124 ]; then
+    fail=$((fail + 1))
+    echo "FAIL: test timed out (possible hang)"
+  elif [ "$exit_code" -ne 0 ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
