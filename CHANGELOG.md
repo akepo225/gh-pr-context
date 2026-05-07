@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.2.2
 
 - **Short SHA support** — `--since` now accepts 7-40 character hex SHAs (previously only 40-character SHAs).
 - **GitHub API fallback** — When a commit is not available locally, `--since` falls back to the GitHub API to resolve the timestamp.
+
+## v0.2.1
+
+- **WSL worktree fix** — Resolve git worktree paths on WSL where `.git` is a file pointing to the worktree.
 
 ## v0.2.0
 
