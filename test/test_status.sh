@@ -86,7 +86,7 @@ setup_mocks_status_sha_fails() {
 run_script() {
   export -f git gh
   export _MOCK_CHECK_RUNS _MOCK_PAGE1 _MOCK_PAGE2 HEAD_SHA
-  bash "$script" "$@"
+  timeout 15 bash "$script" "$@" </dev/null
 }
 
 test_names+=(

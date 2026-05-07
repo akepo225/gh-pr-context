@@ -120,7 +120,7 @@ setup_mocks_logs_no_log() {
 run_script() {
   export -f git gh
   export _MOCK_CHECK_RUNS _MOCK_LOG_CONTENT HEAD_SHA
-  bash "$script" "$@"
+  timeout 15 bash "$script" "$@" </dev/null
 }
 
 test_names+=(

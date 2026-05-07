@@ -16,6 +16,8 @@ setup_mocks() {
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "branch --show-current") echo "feature-branch" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      "rev-parse $KNOWN_SHA") echo "$KNOWN_SHA" ;;
+      "rev-parse $UNKNOWN_SHA") echo "$UNKNOWN_SHA" ;;
       "log -1 --format=%ct HEAD") echo "$MOCK_HEAD_EPOCH" ;;
       "log -1 --format=%ct $KNOWN_SHA") echo "$MOCK_SHA_EPOCH" ;;
       "log -1 --format=%ct $UNKNOWN_SHA") exit 1 ;;
@@ -92,7 +94,7 @@ setup_mocks_with_pr_and_replies() {
 run_script() {
   export -f git gh
   export _MOCK_PR_REVIEWS _MOCK_PR_ISSUES MOCK_HEAD_EPOCH MOCK_SHA_EPOCH KNOWN_SHA UNKNOWN_SHA
-  bash "$script" "$@"
+  timeout 15 bash "$script" "$@" </dev/null
 }
 
 test_names+=(
