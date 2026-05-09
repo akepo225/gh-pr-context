@@ -125,7 +125,13 @@ conclusion: failure
 
 ## Agent Skills
 
-Skills for AI coding assistants that use `gh-pr-context`.
+Integrations for AI coding assistants that use `gh-pr-context`.
+
+### Claude Code GitHub Action
+
+This repo includes a [Claude Code Action](https://github.com/anthropics/claude-code-action) workflow (`.github/workflows/claude.yml`) that enables AI-assisted PR reviews and issue handling directly in GitHub. Mention `@claude` in a PR comment or issue to trigger it.
+
+### CLI Skills
 
 ### Install
 

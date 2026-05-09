@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.3
+
+- **Claude Code GitHub Action** — Added `anthropics/claude-code-action` workflow for AI-assisted PR reviews and issue handling via GitHub Actions.
+
 ## v0.2.2
 
 - **Short SHA support** — `--since` now accepts 7-40 character hex SHAs (previously only 40-character SHAs).
