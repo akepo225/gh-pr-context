@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "$script"
-
 gh() { echo "unexpected gh call in test/test_duration.sh" >&2; return 1; }
 git() { echo "unexpected git call in test/test_duration.sh" >&2; return 1; }
+
+source "$script"
 
 test_names+=(
   test_parse_duration_seconds
