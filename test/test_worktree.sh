@@ -96,7 +96,7 @@ test_worktree_since_last_commit_after_setup() {
   tmpdir=$(mktemp -d)
   local gitdir_target="$tmpdir/gitdir_target"
   mkdir -p "$gitdir_target"
-  echo "gitdir: $gitdir_target" > "$tmpdir/.git"
+  echo "gitdir: gitdir_target" > "$tmpdir/.git"
 
   local exit_code=0 output
   output=$(
