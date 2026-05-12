@@ -113,7 +113,7 @@ resolve_pr_number() {
   local owner=${owner_repo%%/*}
   local repo=${owner_repo#*/}
   local pr_data
-  pr_data=$(gh api "repos/$owner/$repo/pulls?head=$owner:$branch" --jq '.[0].number' | tr -d '\r') || die "failed to look up PR for branch '$branch'"
+  pr_data=$(gh api "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r') || die "failed to look up PR for branch '$branch'"
   if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
     die "no open PR found for branch '$branch'"
   fi
@@ -124,7 +124,7 @@ resolve_pr_head_sha() {
   local pr_number=$1
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  gh api "repos/$owner_repo/pulls/$pr_number" --jq '.head.sha' | tr -d '\r'
+  gh api "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
 resolve_since_timestamp() {
@@ -481,8 +481,7 @@ cmd_monitor_status() {
 # sub-command is provided.
 cmd_monitor() {
   if [ $# -eq 0 ]; then
-    usage_monitor >&2
-    exit 1
+    die "missing monitor sub-command (see 'gh-pr-context monitor --help')"
   fi
 
   local sub_command=$1

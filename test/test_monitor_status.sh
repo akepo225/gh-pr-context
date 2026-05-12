@@ -45,7 +45,7 @@ setup_mocks_monitor_explicit_pr() {
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
-      *"pulls/42"*"--jq"*)
+      *"pulls/42"*"--paginate"*"--jq"*)
         echo "$HEAD_SHA"
         ;;
       *"check-runs"*"--paginate"*)
@@ -72,7 +72,7 @@ setup_mocks_monitor_sha_change() {
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
-      *"pulls/42"*"--jq"*)
+      *"pulls/42"*"--paginate"*"--jq"*)
         if [ "$call_num" -le 1 ]; then
           echo "$HEAD_SHA"
         else
@@ -101,8 +101,8 @@ setup_mocks_monitor_auto_detect() {
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
-      *"pulls?head=acme:feature-branch"*) echo '42' ;;
-      *"pulls/42"*"--jq"*)
+      *"pulls?head=acme:feature-branch"*"--paginate"*) echo '42' ;;
+      *"pulls/42"*"--paginate"*"--jq"*)
         echo "$HEAD_SHA"
         ;;
       *"check-runs"*"--paginate"*)
@@ -123,7 +123,7 @@ setup_mocks_monitor_no_pr() {
   setup_mocks
   gh() {
     case "$*" in
-      *"pulls?head=acme:feature-branch"*) echo "" ;;
+      *"pulls?head=acme:feature-branch"*"--paginate"*) echo "" ;;
       *) exit 1 ;;
     esac
   }
@@ -141,7 +141,7 @@ setup_mocks_monitor_api_failure() {
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
-      *"pulls/42"*"--jq"*)
+      *"pulls/42"*"--paginate"*"--jq"*)
         echo "$HEAD_SHA"
         ;;
       *"check-runs"*"--paginate"*)
