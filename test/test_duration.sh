@@ -21,6 +21,7 @@ test_names+=(
   test_parse_duration_negative_stderr
 )
 
+# Verify parse_duration "30s" outputs 30.
 test_parse_duration_seconds() {
   local result
   result=$(parse_duration "30s") || { fail=$((fail + 1)); echo "FAIL: 30s should exit 0"; return; }
@@ -32,6 +33,7 @@ test_parse_duration_seconds() {
   fi
 }
 
+# Verify parse_duration "5m" outputs 300.
 test_parse_duration_minutes() {
   local result
   result=$(parse_duration "5m") || { fail=$((fail + 1)); echo "FAIL: 5m should exit 0"; return; }
@@ -43,6 +45,7 @@ test_parse_duration_minutes() {
   fi
 }
 
+# Verify parse_duration "1h" outputs 3600.
 test_parse_duration_hours() {
   local result
   result=$(parse_duration "1h") || { fail=$((fail + 1)); echo "FAIL: 1h should exit 0"; return; }
@@ -54,6 +57,7 @@ test_parse_duration_hours() {
   fi
 }
 
+# Verify parse_duration "0s" outputs 0.
 test_parse_duration_zero() {
   local result
   result=$(parse_duration "0s") || { fail=$((fail + 1)); echo "FAIL: 0s should exit 0"; return; }
@@ -65,6 +69,7 @@ test_parse_duration_zero() {
   fi
 }
 
+# Verify parse_duration "90s" outputs 90.
 test_parse_duration_multi_digit_seconds() {
   local result
   result=$(parse_duration "90s") || { fail=$((fail + 1)); echo "FAIL: 90s should exit 0"; return; }
@@ -76,6 +81,7 @@ test_parse_duration_multi_digit_seconds() {
   fi
 }
 
+# Verify parse_duration "100h" outputs 360000.
 test_parse_duration_large_hours() {
   local result
   result=$(parse_duration "100h") || { fail=$((fail + 1)); echo "FAIL: 100h should exit 0"; return; }
@@ -87,6 +93,7 @@ test_parse_duration_large_hours() {
   fi
 }
 
+# Verify parse_duration rejects bare number "300" with exit 1.
 test_parse_duration_bare_number_exits_nonzero() {
   local ec=0
   (parse_duration "300") >/dev/null 2>&1 || ec=$?
@@ -98,6 +105,7 @@ test_parse_duration_bare_number_exits_nonzero() {
   fi
 }
 
+# Verify parse_duration rejects negative "-5m" with exit 1.
 test_parse_duration_negative_exits_nonzero() {
   local ec=0
   (parse_duration "-5m") >/dev/null 2>&1 || ec=$?
@@ -109,6 +117,7 @@ test_parse_duration_negative_exits_nonzero() {
   fi
 }
 
+# Verify parse_duration rejects non-numeric "abc" with exit 1.
 test_parse_duration_non_numeric_exits_nonzero() {
   local ec=0
   (parse_duration "abc") >/dev/null 2>&1 || ec=$?
@@ -120,6 +129,7 @@ test_parse_duration_non_numeric_exits_nonzero() {
   fi
 }
 
+# Verify parse_duration rejects empty string with exit 1.
 test_parse_duration_empty_exits_nonzero() {
   local ec=0
   (parse_duration "") >/dev/null 2>&1 || ec=$?
@@ -131,6 +141,7 @@ test_parse_duration_empty_exits_nonzero() {
   fi
 }
 
+# Verify bare number "300" produces stderr containing "invalid duration".
 test_parse_duration_bare_number_stderr() {
   local output
   output=$(parse_duration "300" 2>&1 >/dev/null) || true
@@ -142,6 +153,7 @@ test_parse_duration_bare_number_stderr() {
   fi
 }
 
+# Verify negative "-5m" produces stderr containing "invalid duration".
 test_parse_duration_negative_stderr() {
   local output
   output=$(parse_duration "-5m" 2>&1 >/dev/null) || true

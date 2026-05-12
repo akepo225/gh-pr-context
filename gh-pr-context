@@ -8,6 +8,8 @@ die() {
   exit 1
 }
 
+# Parse a duration string (<number><s|m|h>) and output seconds.
+# Exits 1 on invalid input (empty, bare number, negative, non-numeric).
 parse_duration() {
   local input="${1:-}"
   if [ -z "$input" ]; then
