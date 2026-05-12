@@ -94,9 +94,9 @@ HEAD_EPOCH="1742040000"
 test_worktree_since_last_commit_after_setup() {
   local tmpdir
   tmpdir=$(mktemp -d)
-  local gitdir_base="$tmpdir/.git/worktrees/wt"
-  mkdir -p "$gitdir_base"
-  echo "gitdir: $gitdir_base" > "$tmpdir/.git"
+  local gitdir_target="$tmpdir/gitdir_target"
+  mkdir -p "$gitdir_target"
+  echo "gitdir: $gitdir_target" > "$tmpdir/.git"
 
   local exit_code=0 output
   output=$(
