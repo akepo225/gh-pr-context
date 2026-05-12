@@ -105,6 +105,7 @@ usage_monitor() {
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
   echo "  -h, --help           Show this message"
 }
 
@@ -114,6 +115,7 @@ usage_monitor_status() {
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
   echo "  -h, --help           Show this message"
 }
 
@@ -397,9 +399,9 @@ capture_check_snapshot() {
 # cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
 # detecting state transitions (status/conclusion changes), new checks appearing,
 # checks disappearing, and new commits pushed to the PR. Prints terse `--- change`
-# notifications and exits 0 on change, exits 1 on error.
+# notifications and exits 0 on change, exits 1 on error, exits 2 on timeout.
 cmd_monitor_status() {
-  local pr_number="" interval=30
+  local pr_number="" interval=30 timeout_input="" timeout_secs=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -413,6 +415,11 @@ cmd_monitor_status() {
         if ! echo "$interval" | grep -qE '^[1-9][0-9]*$'; then
           die "invalid --interval value: $interval (expected a positive integer)"
         fi
+        ;;
+      --timeout)
+        [ $# -ge 2 ] || die "missing value for --timeout"
+        timeout_input="$2"; shift 2
+        timeout_secs=$(parse_duration "$timeout_input")
         ;;
       -h|--help) usage_monitor_status; exit 0 ;;
       *) die "unknown option: $1" ;;
@@ -435,6 +442,7 @@ cmd_monitor_status() {
   local prev_snapshot
   prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha")
 
+  SECONDS=0
   while true; do
     sleep "$interval"
 
@@ -493,6 +501,11 @@ cmd_monitor_status() {
 
     prev_sha="$cur_sha"
     prev_snapshot="$cur_snapshot"
+
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
   done
 }
 
