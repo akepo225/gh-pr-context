@@ -66,6 +66,7 @@ usage() {
   echo "  comments   Fetch PR comments"
   echo "  status     Fetch CI check status"
   echo "  logs       Fetch logs for failed CI checks"
+  echo "  monitor    Poll for changes to CI status or comments"
   echo ""
   echo "options:"
   echo "  --pr <number>   PR number (auto-detected from branch if omitted)"
@@ -73,6 +74,27 @@ usage() {
   echo "  --all           Return all comments (default)"
   echo "  --version       Show version"
   echo "  -h, --help      Show this message"
+}
+
+usage_monitor() {
+  echo "usage: gh-pr-context monitor <sub-command> [options]"
+  echo ""
+  echo "sub-commands:"
+  echo "  status   Monitor CI check state changes"
+  echo ""
+  echo "options:"
+  echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
+  echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  -h, --help           Show this message"
+}
+
+usage_monitor_status() {
+  echo "usage: gh-pr-context monitor status [options]"
+  echo ""
+  echo "options:"
+  echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
+  echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  -h, --help           Show this message"
 }
 
 resolve_owner_repo() {
@@ -341,6 +363,138 @@ cmd_logs() {
   done <<< "$failed_pairs"
 }
 
+# capture_check_snapshot fetches check-runs for a given SHA via the GitHub API
+# and returns a normalized JSON array of {name, status, conclusion} objects
+# sorted by check name, suitable for diffing between poll cycles.
+capture_check_snapshot() {
+  local owner_repo=$1 sha=$2
+  local checks_json
+  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
+    || die "failed to fetch check runs for SHA $sha"
+  echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
+}
+
+# cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
+# detecting state transitions (status/conclusion changes), new checks appearing,
+# checks disappearing, and new commits pushed to the PR. Prints terse `--- change`
+# notifications and exits 0 on change, exits 1 on error.
+cmd_monitor_status() {
+  local pr_number="" interval=30
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"; shift 2
+        if ! echo "$interval" | grep -qE '^[1-9][0-9]*$'; then
+          die "invalid --interval value: $interval (expected a positive integer)"
+        fi
+        ;;
+      -h|--help) usage_monitor_status; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  check_deps
+
+  if [ -z "$pr_number" ]; then
+    pr_number=$(resolve_pr_number)
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local prev_sha
+  prev_sha=$(resolve_pr_head_sha "$pr_number") \
+    || die "failed to resolve head SHA for PR #$pr_number"
+
+  local prev_snapshot
+  prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha")
+
+  while true; do
+    sleep "$interval"
+
+    local cur_sha
+    if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then
+      die "failed to re-resolve head SHA for PR #$pr_number"
+    fi
+
+    if [ "$cur_sha" != "$prev_sha" ]; then
+      echo "--- change"
+      echo "type: new-commit"
+      echo "sha: $cur_sha"
+      exit 0
+    fi
+
+    local cur_snapshot
+    if ! cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" 2>&1); then
+      die "failed to fetch check runs during poll"
+    fi
+
+    local changes
+    changes=$(printf '%s\n%s\n' "$prev_snapshot" "$cur_snapshot" | jq -s '
+      . as $snapshots |
+      ($snapshots[0]) as $old |
+      ($snapshots[1]) as $new |
+      (($old | map(.name)) + ($new | map(.name))) | unique | sort |
+      map(
+        . as $name |
+        ($old | map(select(.name == $name)) | first) as $o |
+        ($new | map(select(.name == $name)) | first) as $n |
+        if $o == null then
+          {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
+        elif $n == null then
+          {check: $name, from: $o.status, to: "absent", conclusion: null}
+        elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
+          {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
+        else
+          empty
+        end
+      )
+    ')
+
+    local change_count
+    change_count=$(echo "$changes" | jq 'length' | tr -d '\r')
+
+    if [ "$change_count" -gt 0 ]; then
+      echo "$changes" | jq -r '.[] |
+        "--- change\n" +
+        "type: status\n" +
+        "check: \(.check)\n" +
+        "from: \(.from)\n" +
+        "to: \(.to)" +
+        if (.conclusion != null and .to != "absent") then "\nconclusion: \(.conclusion)" else "" end'
+      exit 0
+    fi
+
+    prev_sha="$cur_sha"
+    prev_snapshot="$cur_snapshot"
+  done
+}
+
+# cmd_monitor is the top-level dispatcher for the monitor command, routing
+# sub-commands (status) to their handlers. Exits 1 with usage when no
+# sub-command is provided.
+cmd_monitor() {
+  if [ $# -eq 0 ]; then
+    usage_monitor >&2
+    exit 1
+  fi
+
+  local sub_command=$1
+  shift
+
+  case "$sub_command" in
+    status) cmd_monitor_status "$@" ;;
+    -h|--help) usage_monitor; exit 0 ;;
+    *) die "unknown monitor sub-command: $sub_command" ;;
+  esac
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   if [ $# -eq 0 ]; then
     usage
@@ -354,6 +508,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     comments) cmd_comments "$@" ;;
     status)   cmd_status "$@" ;;
     logs)     cmd_logs "$@" ;;
+    monitor)  cmd_monitor "$@" ;;
     -h|--help) usage; exit 0 ;;
     --version) echo "gh-pr-context $version"; exit 0 ;;
     *) die "unknown command: $command" ;;
