@@ -100,6 +100,7 @@ test_worktree_since_last_commit_after_setup() {
 
   local exit_code=0 output
   output=$(
+    unset GIT_DIR GIT_WORK_TREE
     export -f die parse_duration resolve_since_timestamp resolve_owner_repo resolve_pr_number resolve_pr_head_sha check_deps setup_git_env
     export HEAD_EPOCH
     cd "$tmpdir"
