@@ -129,7 +129,7 @@ test_worktree_since_last_commit_after_setup() {
       esac
     }
     export -f git gh
-    timeout 15 bash "$script" comments --since last-commit 2>&1
+    timeout 15 bash "$script" comments --pr 42 --since last-commit 2>&1
   ) || exit_code=$?
 
   rm -rf "$tmpdir"
