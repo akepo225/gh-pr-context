@@ -444,7 +444,19 @@ cmd_monitor_status() {
 
   SECONDS=0
   while true; do
-    sleep "$interval"
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
+    local sleep_for="$interval"
+    if [ -n "$timeout_secs" ]; then
+      local remaining=$((timeout_secs - SECONDS))
+      if [ "$remaining" -lt "$sleep_for" ]; then
+        sleep_for="$remaining"
+      fi
+    fi
+    sleep "$sleep_for"
 
     local cur_sha
     if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then

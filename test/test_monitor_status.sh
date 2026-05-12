@@ -551,13 +551,27 @@ test_monitor_status_no_timeout_preserves_behavior() {
 # test_monitor_status_missing_timeout_value_exits_nonzero verifies that --timeout
 # without a value exits 1 with a clear error message.
 test_monitor_status_missing_timeout_value_exits_nonzero() {
-  assert_exit 1 "monitor status --timeout without value exits 1" bash "$script" monitor status --timeout
+  local output exit_code=0
+  output=$(bash "$script" monitor status --timeout 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --timeout"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: expected exit 1 and 'missing value for --timeout' (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_invalid_timeout_exits_nonzero verifies that --timeout with
-# an invalid value exits 1.
+# an invalid value exits 1 with an "invalid duration" error message.
 test_monitor_status_invalid_timeout_exits_nonzero() {
-  assert_exit 1 "monitor status --timeout abc exits 1" bash "$script" monitor status --timeout abc
+  local output exit_code=0
+  output=$(bash "$script" monitor status --timeout abc 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid duration"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: expected exit 1 and 'invalid duration' (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_help_shows_timeout verifies that monitor status --help
