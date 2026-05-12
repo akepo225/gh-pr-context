@@ -8,6 +8,24 @@ die() {
   exit 1
 }
 
+parse_duration() {
+  local input="${1:-}"
+  if [ -z "$input" ]; then
+    die "invalid duration: (empty)"
+  fi
+  if [[ "$input" =~ ^([0-9]+)(s|m|h)$ ]]; then
+    local num="${BASH_REMATCH[1]}"
+    local suffix="${BASH_REMATCH[2]}"
+    case "$suffix" in
+      s) echo "$num" ;;
+      m) echo $((num * 60)) ;;
+      h) echo $((num * 3600)) ;;
+    esac
+  else
+    die "invalid duration: $input (expected <number><s|m|h>)"
+  fi
+}
+
 setup_git_env() {
   (git rev-parse --git-dir >/dev/null 2>&1) && return 0
 
