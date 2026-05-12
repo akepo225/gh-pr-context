@@ -110,7 +110,13 @@ test_worktree_since_last_commit_after_setup() {
           ;;
         "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
         "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
-        "log -1 --format=%ct HEAD") echo "$HEAD_EPOCH" ;;
+        "log -1 --format=%ct HEAD")
+          if [ -n "${GIT_DIR:-}" ] && [ -n "${GIT_WORK_TREE:-}" ]; then
+            echo "$HEAD_EPOCH"
+          else
+            exit 1
+          fi
+          ;;
         *) exit 1 ;;
       esac
     }
