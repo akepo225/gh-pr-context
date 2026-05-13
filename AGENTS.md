@@ -61,3 +61,7 @@ Five-label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-f
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.
+
+### Delivery
+
+When delivering a task, if there are follow-up items that can't be implemented now or are outside the scope of the current PR, use the `/to-issues` skill to create new issues for them.
