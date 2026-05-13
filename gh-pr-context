@@ -147,6 +147,32 @@ resolve_pr_head_sha() {
   gh api "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
+validate_since_format() {
+  local input="${1:-}"
+  if [ -z "$input" ]; then return 0; fi
+  if [ "$input" = "last-commit" ]; then return 0; fi
+  if echo "$input" | grep -qE '^[0-9a-fA-F]{7,40}$'; then return 0; fi
+  if echo "$input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+    local ts="${input}T00:00:00Z"
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $input (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
+      || die "invalid --since value: $input (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    return 0
+  fi
+  if echo "$input" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
+    local ts="${input}Z"
+    local rt
+    rt=$(echo "$ts" | jq -R 'fromdateiso8601 | todateiso8601' 2>/dev/null) \
+      || die "invalid --since value: $input (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    [ "$rt" = "\"$ts\"" ] \
+      || die "invalid --since value: $input (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+    return 0
+  fi
+  die "invalid --since value: $input (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)"
+}
+
 resolve_since_timestamp() {
   local since_input="${1:-}"
   if [ -z "$since_input" ]; then
@@ -203,7 +229,7 @@ resolve_since_timestamp() {
 }
 
 cmd_comments() {
-  local pr_number="" since_ref="" force_all=false
+  local pr_number="" since_ref="" since_input="" force_all=false
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -213,7 +239,8 @@ cmd_comments() {
         ;;
       --since)
         [ $# -ge 2 ] || die "missing value for --since"
-        since_ref=$(resolve_since_timestamp "$2"); shift 2
+        validate_since_format "$2"
+        since_input="$2"; shift 2
         ;;
       --all)  force_all=true; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -222,10 +249,14 @@ cmd_comments() {
   done
 
   if [ "$force_all" = true ]; then
-    since_ref=""
+    since_input=""
   fi
 
   check_deps
+
+  if [ -n "$since_input" ]; then
+    since_ref=$(resolve_since_timestamp "$since_input")
+  fi
 
   if [ -z "$pr_number" ]; then
     pr_number=$(resolve_pr_number)
