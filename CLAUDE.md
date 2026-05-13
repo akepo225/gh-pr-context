@@ -13,3 +13,7 @@ When creating a new release:
 5. Push: `git push && git push --tags`
 
 The CI version/tag consistency check will fail if the script version doesn't match the latest tag.
+
+## Delivery
+
+When delivering a task, if there are follow-up items that can't be implemented now or are outside the scope of the current PR, use the `/to-issues` skill to create new issues for them.
