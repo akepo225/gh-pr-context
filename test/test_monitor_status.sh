@@ -156,6 +156,38 @@ setup_mocks_monitor_api_failure() {
   }
 }
 
+# setup_mocks_monitor_no_change configures git/gh mocks where data never changes,
+# suitable for timeout tests. Defines a sleep() wrapper that calls the real system
+# sleep so SECONDS advances correctly and no leaked mock from other tests interferes.
+setup_mocks_monitor_no_change() {
+  sleep() { command sleep "$@"; }
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*"--paginate"*)
+        echo '{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
+# run_script_with_real_sleep runs the script with mocked git/gh but real sleep,
+# so SECONDS-based timeout tests work correctly.
+run_script_with_real_sleep() {
+  export -f git gh sleep _mock_counter_next
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  timeout 15 bash "$script" "$@" </dev/null
+}
+
 # run_script runs the target script in a subshell with the mocked git, gh, sleep,
 # and _mock_counter_next functions exported so the script sees the test-provided behavior.
 run_script() {
@@ -189,6 +221,14 @@ test_names+=(
   test_monitor_status_invalid_interval_exits_nonzero
   test_monitor_status_zero_interval_exits_nonzero
   test_usage_lists_monitor
+  test_monitor_status_timeout_exits_two
+  test_monitor_status_timeout_stderr_message
+  test_monitor_status_timeout_minutes
+  test_monitor_status_timeout_hours
+  test_monitor_status_no_timeout_preserves_behavior
+  test_monitor_status_missing_timeout_value_exits_nonzero
+  test_monitor_status_invalid_timeout_exits_nonzero
+  test_monitor_status_help_shows_timeout
 )
 
 # test_monitor_status_single_check_change verifies that a single check transitioning
@@ -428,5 +468,123 @@ test_usage_lists_monitor() {
   else
     fail=$((fail + 1))
     echo "FAIL: usage should list monitor command"
+  fi
+}
+
+# test_monitor_status_timeout_exits_two verifies that --timeout 2s with --interval 1
+# exits code 2 when no state change occurs within 2 seconds.
+test_monitor_status_timeout_exits_two() {
+  setup_mocks_monitor_no_change
+  local exit_code=0
+  run_script_with_real_sleep monitor status --pr 42 --interval 1 --timeout 2s >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 2 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: timeout should exit 2 (got $exit_code)"
+  fi
+}
+
+# test_monitor_status_timeout_stderr_message verifies that the timeout stderr message
+# includes the duration string (e.g. "monitor timed out after 2s").
+test_monitor_status_timeout_stderr_message() {
+  setup_mocks_monitor_no_change
+  local stderr_output
+  stderr_output=$(run_script_with_real_sleep monitor status --pr 42 --interval 1 --timeout 2s 2>&1 >/dev/null) || true
+  if echo "$stderr_output" | grep -qF "monitor timed out after 2s"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: timeout stderr should contain 'monitor timed out after 2s' (got: $stderr_output)"
+  fi
+}
+
+# test_monitor_status_timeout_minutes verifies that --timeout 5m is accepted and
+# the duration is parsed correctly by proving the monitor starts successfully.
+test_monitor_status_timeout_minutes() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  setup_mocks_monitor_explicit_pr "$initial" "$changed"
+  local exit_code=0
+  run_script monitor status --pr 42 --interval 1 --timeout 5m >/dev/null 2>&1 || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --timeout 5m should be accepted (got exit $exit_code)"
+  fi
+}
+
+# test_monitor_status_timeout_hours verifies that --timeout 1h is accepted and
+# the duration is parsed correctly by proving the monitor starts successfully.
+test_monitor_status_timeout_hours() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  setup_mocks_monitor_explicit_pr "$initial" "$changed"
+  local exit_code=0
+  run_script monitor status --pr 42 --interval 1 --timeout 1h >/dev/null 2>&1 || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --timeout 1h should be accepted (got exit $exit_code)"
+  fi
+}
+
+# test_monitor_status_no_timeout_preserves_behavior verifies that omitting --timeout
+# preserves existing behavior (monitor runs until change is detected, exits 0).
+test_monitor_status_no_timeout_preserves_behavior() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  setup_mocks_monitor_explicit_pr "$initial" "$changed"
+  local exit_code=0
+  run_script monitor status --pr 42 --interval 1 >/dev/null 2>&1 || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: no timeout should detect change and exit 0 (got exit $exit_code)"
+  fi
+}
+
+# test_monitor_status_missing_timeout_value_exits_nonzero verifies that --timeout
+# without a value exits 1 with a clear error message.
+test_monitor_status_missing_timeout_value_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --timeout 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --timeout"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: expected exit 1 and 'missing value for --timeout' (exit=$exit_code, output: $output)"
+  fi
+}
+
+# test_monitor_status_invalid_timeout_exits_nonzero verifies that --timeout with
+# an invalid value exits 1 with an "invalid duration" error message.
+test_monitor_status_invalid_timeout_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --timeout abc 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid duration"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: expected exit 1 and 'invalid duration' (exit=$exit_code, output: $output)"
+  fi
+}
+
+# test_monitor_status_help_shows_timeout verifies that monitor status --help
+# includes the --timeout option in the usage output.
+test_monitor_status_help_shows_timeout() {
+  local output
+  output=$(bash "$script" monitor status --help 2>&1)
+  if echo "$output" | grep -qF -- "--timeout"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --help should list --timeout (output: $output)"
   fi
 }
