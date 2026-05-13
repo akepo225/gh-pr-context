@@ -157,8 +157,10 @@ setup_mocks_monitor_api_failure() {
 }
 
 # setup_mocks_monitor_no_change configures git/gh mocks where data never changes,
-# suitable for timeout tests. Does NOT mock sleep so SECONDS advances in real time.
+# suitable for timeout tests. Defines a sleep() wrapper that calls the real system
+# sleep so SECONDS advances correctly and no leaked mock from other tests interferes.
 setup_mocks_monitor_no_change() {
+  sleep() { command sleep "$@"; }
   git() {
     case "$*" in
       "rev-parse --git-dir") echo ".git" ;;
@@ -181,7 +183,7 @@ setup_mocks_monitor_no_change() {
 # run_script_with_real_sleep runs the script with mocked git/gh but real sleep,
 # so SECONDS-based timeout tests work correctly.
 run_script_with_real_sleep() {
-  export -f git gh _mock_counter_next
+  export -f git gh sleep _mock_counter_next
   export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
   timeout 15 bash "$script" "$@" </dev/null
 }

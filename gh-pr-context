@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="0.2.3"
+version="0.2.4"
 
 die() {
   echo "error: $1" >&2
