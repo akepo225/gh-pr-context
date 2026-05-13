@@ -458,6 +458,11 @@ cmd_monitor_status() {
     fi
     sleep "$sleep_for"
 
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
     local cur_sha
     if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then
       die "failed to re-resolve head SHA for PR #$pr_number"
@@ -513,11 +518,6 @@ cmd_monitor_status() {
 
     prev_sha="$cur_sha"
     prev_snapshot="$cur_snapshot"
-
-    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
-      echo "monitor timed out after $timeout_input" >&2
-      exit 2
-    fi
   done
 }
 
