@@ -144,6 +144,9 @@ Or manually copy the skill:
 ```bash
 mkdir -p ~/.agents/skills/deliver
 cp skills/deliver/SKILL.md ~/.agents/skills/deliver/SKILL.md
+
+mkdir -p ~/.agents/skills/to-issues
+cp skills/to-issues/SKILL.md ~/.agents/skills/to-issues/SKILL.md
 ```
 
 Requires `gh-pr-context` on PATH — see [Install](#install) above.
@@ -153,6 +156,9 @@ Requires `gh-pr-context` on PATH — see [Install](#install) above.
 | Skill | Description |
 |---|---|
 | [deliver](skills/deliver/SKILL.md) | Pre-delivery QA & review workflow. Fetches PR comments, CI status, and failed check logs. Invoke before creating a PR. |
+| [to-issues](skills/to-issues/SKILL.md) | Break a plan into independently-grabbable issues using vertical slices. Based on [Matt Pocock's agent skills](https://github.com/mattpocockuk/agent-skills). |
+
+The to-issues skill is based on [Matt Pocock's agent skills](https://github.com/mattpocockuk/agent-skills), used under the MIT license.
 
 ## License
 
