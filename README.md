@@ -142,8 +142,8 @@ npx skills@latest add akepo225/gh-pr-context
 Or manually copy the skill:
 
 ```bash
-mkdir -p ~/.agents/skills/pr-qa-review
-cp skills/pr-qa-review/SKILL.md ~/.agents/skills/pr-qa-review/SKILL.md
+mkdir -p ~/.agents/skills/deliver
+cp skills/deliver/SKILL.md ~/.agents/skills/deliver/SKILL.md
 ```
 
 Requires `gh-pr-context` on PATH — see [Install](#install) above.
@@ -152,7 +152,7 @@ Requires `gh-pr-context` on PATH — see [Install](#install) above.
 
 | Skill | Description |
 |---|---|
-| [pr-qa-review](skills/pr-qa-review/SKILL.md) | QA & delivery review workflow. Fetches PR comments, CI status, and failed check logs. Use when implementation is complete and ready for self-review, QA, or PR creation. |
+| [deliver](skills/deliver/SKILL.md) | Pre-delivery QA & review workflow. Fetches PR comments, CI status, and failed check logs. Invoke before creating a PR. |
 
 ## License
 

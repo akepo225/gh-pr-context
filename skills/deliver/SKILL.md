@@ -1,6 +1,6 @@
 ---
-name: pr-qa-review
-description: 'QA & delivery review workflow for PRs using gh-pr-context to fetch PR comments, CI status, and failed check logs. Use when implementation is complete and ready for self-review, QA, and PR creation. Triggers: "qa review", "delivery review", "ready to ship", "self-review", "create PR", "review my changes".'
+name: deliver
+description: 'Pre-delivery QA & review workflow for PRs using gh-pr-context to fetch PR comments, CI status, and failed check logs. Invoke BEFORE creating a PR. Triggers: "qa review", "delivery review", "ready to ship", "pre-delivery", "final check", "ship it".'
 compatibility: 'Requires gh-pr-context on PATH, gh (authenticated), jq, and bash'
 allowed-tools: 'Bash(gh-pr-context:*) Bash(gh:*) Bash(jq:*) Bash(git:*)'
 ---
@@ -24,6 +24,10 @@ curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/insta
 ```
 
 Verify: `gh-pr-context --help`. Requires `gh` (authenticated), `jq`, and `bash`.
+
+## When to invoke
+
+Invoke BEFORE creating a PR. Steps 1-5 are pre-PR. Step 6 creates the PR. Step 7 is post-PR monitoring. Do NOT invoke after pushing as a post-hoc review.
 
 ## Workflow
 
