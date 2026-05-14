@@ -27,7 +27,7 @@ Verify: `gh-pr-context --help`. Requires `gh` (authenticated), `jq`, and `bash`.
 
 ## When to invoke
 
-Invoke BEFORE creating a PR. Steps 1-5 are pre-PR. Step 6 creates the PR. Step 7 is post-PR monitoring. Do NOT invoke after pushing as a post-hoc review.
+Invoke BEFORE creating a PR to run the pre-PR checks (steps 1-3), then create the PR (step 4), and proceed with post-PR review (steps 5-7). Do NOT invoke after pushing as a post-hoc review.
 
 ## Workflow
 
@@ -51,7 +51,13 @@ Invoke BEFORE creating a PR. Steps 1-5 are pre-PR. Step 6 creates the PR. Step 7
 - Exercise changed functionality manually or via integration tests where applicable.
 - Check container logs, server output, or browser console for errors if relevant.
 
-### 4. Gather PR Context
+### 4. Create a Pull Request (skip if PR already exists)
+
+- Do **not** push to `main`. Create a feature branch and open a PR.
+- Write a clear summary: what changed, why, and how it was tested.
+- Link the original issue.
+
+### 5. Gather PR Context
 
 Run these commands in the project directory (branch must have an open PR, or pass `--pr <number>`):
 
@@ -78,15 +84,9 @@ Read the output carefully. For each comment or failed check, determine if action
 - `--- check` — CI check. Fields: `name`, `status`, optional `conclusion`.
 - `--- log` — Failed check log. Fields: `name`, log body. Truncated at 500 lines with `[truncated: N lines omitted]`.
 
-### 5. Fix All Findings
+### 6. Fix All Findings
 
-Address every legitimate issue from steps 1–4. Dismiss only clearly false positives — explain dismissals in the commit message or PR description.
-
-### 6. Create a Pull Request (skip if PR already exists)
-
-- Do **not** push to `main`. Create a feature branch and open a PR.
-- Write a clear summary: what changed, why, and how it was tested.
-- Link the original issue.
+Address every legitimate issue from steps 1, 2, 3, and 5. Dismiss only clearly false positives — explain dismissals in the commit message or PR description.
 
 ### 7. Monitor & Iterate
 
