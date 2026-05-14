@@ -27,7 +27,7 @@ Verify: `gh-pr-context --help`. Requires `gh` (authenticated), `jq`, and `bash`.
 
 ## When to invoke
 
-Invoke BEFORE creating a PR. Steps 1-5 are pre-PR. Step 6 creates the PR. Step 7 is post-PR monitoring. Do NOT invoke after pushing as a post-hoc review.
+Invoke BEFORE creating a PR. Steps 1-3 (self-review, integration check, runtime verification) are pre-PR. Step 6 creates the PR. Steps 4-5 and 7 (gather PR context, fix findings, monitor) run after the PR exists. Do NOT invoke after pushing as a post-hoc review.
 
 ## Workflow
 
