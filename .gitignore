@@ -2,3 +2,9 @@
 *.swo
 *~
 .DS_Store
+.claude/skills/
+.agents/
+.claude/
+.trae/
+.windsurf/
+skills-lock.json
