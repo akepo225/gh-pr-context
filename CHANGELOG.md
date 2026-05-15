@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.5
+
+- **monitor comments** — New sub-command to poll for new review and issue comments on a PR, reporting `type: new-comment` with `count` on change.
+
 ## v0.2.3
 
 - **Claude Code GitHub Action** — Added `anthropics/claude-code-action` workflow for AI-assisted PR reviews and issue handling via GitHub Actions.
