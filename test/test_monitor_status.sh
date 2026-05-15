@@ -184,13 +184,13 @@ setup_mocks_monitor_no_change() {
 # so SECONDS-based timeout tests work correctly.
 run_script_with_real_sleep() {
   export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
   timeout 15 bash "$script" "$@" </dev/null
 }
 
 run_script() {
   export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
   timeout 15 bash "$script" "$@" </dev/null
 }
 
@@ -594,35 +594,6 @@ test_monitor_status_help_shows_timeout() {
     fail=$((fail + 1))
     echo "FAIL: monitor status --help should list --timeout (output: $output)"
   fi
-}
-
-# setup_mocks_monitor_check_appearing configures git/gh mocks where the filtered
-# check is absent in the first N check-runs calls and appears on a later call,
-# simulating a CI check that hasn't been created yet.
-setup_mocks_monitor_check_appearing() {
-  _MOCK_INITIAL="$1"
-  _MOCK_CHANGED="$2"
-  _MOCK_APPEAR_AT="${3:-3}"
-  _MOCK_COUNTER_FILE=$(mktemp)
-  echo 0 > "$_MOCK_COUNTER_FILE"
-  setup_mocks
-  gh() {
-    local call_num
-    call_num=$(_mock_counter_next)
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*)
-        echo "$HEAD_SHA"
-        ;;
-      *"check-runs"*"--paginate"*)
-        if [ "$call_num" -le "$_MOCK_APPEAR_AT" ]; then
-          echo "$_MOCK_INITIAL"
-        else
-          echo "$_MOCK_CHANGED"
-        fi
-        ;;
-      *) exit 1 ;;
-    esac
-  }
 }
 
 # test_monitor_status_check_missing_value_flag verifies that --check followed
