@@ -105,6 +105,7 @@ usage_monitor() {
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
   echo "  -h, --help           Show this message"
 }
@@ -115,6 +116,7 @@ usage_monitor_status() {
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
   echo "  -h, --help           Show this message"
 }
@@ -432,7 +434,7 @@ capture_check_snapshot() {
 # checks disappearing, and new commits pushed to the PR. Prints terse `--- change`
 # notifications and exits 0 on change, exits 1 on error, exits 2 on timeout.
 cmd_monitor_status() {
-  local pr_number="" interval=30 timeout_input="" timeout_secs=""
+  local pr_number="" interval=30 timeout_input="" timeout_secs="" check_filter=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -451,6 +453,11 @@ cmd_monitor_status() {
         [ $# -ge 2 ] || die "missing value for --timeout"
         timeout_input="$2"; shift 2
         timeout_secs=$(parse_duration "$timeout_input")
+        ;;
+      --check)
+        [ $# -ge 2 ] || die "missing value for --check"
+        [ "${2#-}" = "$2" ] || die "missing value for --check"
+        check_filter="$2"; shift 2
         ;;
       -h|--help) usage_monitor_status; exit 0 ;;
       *) die "unknown option: $1" ;;
@@ -472,6 +479,9 @@ cmd_monitor_status() {
 
   local prev_snapshot
   prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha")
+  if [ -n "$check_filter" ]; then
+    prev_snapshot=$(echo "$prev_snapshot" | jq --arg name "$check_filter" 'map(select(.name == $name))')
+  fi
 
   SECONDS=0
   while true; do
@@ -509,6 +519,9 @@ cmd_monitor_status() {
     local cur_snapshot
     if ! cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" 2>&1); then
       die "failed to fetch check runs during poll"
+    fi
+    if [ -n "$check_filter" ]; then
+      cur_snapshot=$(echo "$cur_snapshot" | jq --arg name "$check_filter" 'map(select(.name == $name))')
     fi
 
     local changes

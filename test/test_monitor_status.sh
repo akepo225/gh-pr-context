@@ -229,6 +229,14 @@ test_names+=(
   test_monitor_status_missing_timeout_value_exits_nonzero
   test_monitor_status_invalid_timeout_exits_nonzero
   test_monitor_status_help_shows_timeout
+  test_monitor_status_check_missing_value_flag
+  test_monitor_status_check_missing_value_last
+  test_monitor_status_check_filters_to_named_check
+  test_monitor_status_check_ignores_other_changes
+  test_monitor_status_check_appears_after_delay
+  test_monitor_status_check_timeout_missing_check
+  test_monitor_status_check_case_sensitive
+  test_monitor_status_help_shows_check
 )
 
 # test_monitor_status_single_check_change verifies that a single check transitioning
@@ -586,5 +594,226 @@ test_monitor_status_help_shows_timeout() {
   else
     fail=$((fail + 1))
     echo "FAIL: monitor status --help should list --timeout (output: $output)"
+  fi
+}
+
+# setup_mocks_monitor_check_appearing configures git/gh mocks where the filtered
+# check is absent in the first N check-runs calls and appears on a later call,
+# simulating a CI check that hasn't been created yet.
+setup_mocks_monitor_check_appearing() {
+  _MOCK_INITIAL="$1"
+  _MOCK_CHANGED="$2"
+  _MOCK_APPEAR_AT="${3:-3}"
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  setup_mocks
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*)
+        echo "$HEAD_SHA"
+        ;;
+      *"check-runs"*"--paginate"*)
+        if [ "$call_num" -le "$_MOCK_APPEAR_AT" ]; then
+          echo "$_MOCK_INITIAL"
+        else
+          echo "$_MOCK_CHANGED"
+        fi
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
+# test_monitor_status_check_missing_value_flag verifies that --check followed
+# by another flag (no value) exits 1 with "missing value for --check".
+test_monitor_status_check_missing_value_flag() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --check --timeout 30s 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --check"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check followed by flag should exit 1 (exit=$exit_code, output: $output)"
+  fi
+}
+
+# test_monitor_status_check_missing_value_last verifies that --check as the
+# last argument (no value) exits 1 with "missing value for --check".
+test_monitor_status_check_missing_value_last() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --check 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --check"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check as last arg should exit 1 (exit=$exit_code, output: $output)"
+  fi
+}
+
+# test_monitor_status_check_filters_to_named_check verifies that --check CI only
+# reports changes for the CI check, ignoring other checks that also change.
+test_monitor_status_check_filters_to_named_check() {
+  local initial='{"total_count":2,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":2,"check_runs":[{"name":"Build","status":"completed","conclusion":"success"},{"name":"CI","status":"completed","conclusion":"failure"}]}'
+  setup_mocks_monitor_explicit_pr "$initial" "$changed"
+  local output
+  output=$(run_script monitor status --pr 42 --interval 1 --check CI 2>&1)
+  cleanup_mock_counter
+  if echo "$output" | grep -qF "check: CI" \
+    && echo "$output" | grep -qF "from: in_progress" \
+    && echo "$output" | grep -qF "to: completed" \
+    && echo "$output" | grep -qF "conclusion: failure" \
+    && ! echo "$output" | grep -qF "check: Build"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check should filter to named check only (output: $output)"
+  fi
+}
+
+# test_monitor_status_check_ignores_other_changes verifies that when non-filtered
+# checks change but the filtered check does not, no change output is produced.
+# Uses --timeout with real sleep to avoid infinite polling.
+test_monitor_status_check_ignores_other_changes() {
+  _MOCK_INITIAL='{"total_count":2,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
+  _MOCK_CHANGED='{"total_count":2,"check_runs":[{"name":"Build","status":"completed","conclusion":"success"},{"name":"CI","status":"in_progress","conclusion":null}]}'
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  sleep() { command sleep "$@"; }
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*)
+        echo "$HEAD_SHA"
+        ;;
+      *"check-runs"*"--paginate"*)
+        if [ "$call_num" -le 2 ]; then
+          echo "$_MOCK_INITIAL"
+        else
+          echo "$_MOCK_CHANGED"
+        fi
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+  local exit_code=0
+  run_script_with_real_sleep monitor status --pr 42 --interval 1 --check CI --timeout 2s >/dev/null 2>&1 || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 2 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check CI should not detect Build change, should timeout exit 2 (got $exit_code)"
+  fi
+}
+
+# test_monitor_status_check_appears_after_delay verifies permissive behavior:
+# when the named check is absent in the initial snapshot but appears in a later
+# poll, the output shows from: absent.
+test_monitor_status_check_appears_after_delay() {
+  local initial='{"total_count":1,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":2,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
+  setup_mocks_monitor_check_appearing "$initial" "$changed" 2
+  local output
+  output=$(run_script monitor status --pr 42 --interval 1 --check CI 2>&1)
+  cleanup_mock_counter
+  if echo "$output" | grep -qF "check: CI" \
+    && echo "$output" | grep -qF "from: absent" \
+    && echo "$output" | grep -qF "to: in_progress" \
+    && ! echo "$output" | grep -qF "check: Build"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check should show from: absent for delayed check (output: $output)"
+  fi
+}
+
+# test_monitor_status_check_timeout_missing_check verifies that when --check
+# names a check that never appears and --timeout is set, the monitor exits 2.
+test_monitor_status_check_timeout_missing_check() {
+  sleep() { command sleep "$@"; }
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*"--paginate"*)
+        echo '{"total_count":1,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null}]}'
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+  local exit_code=0
+  run_script_with_real_sleep monitor status --pr 42 --interval 1 --check CI --timeout 2s >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 2 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check with missing check and --timeout should exit 2 (got $exit_code)"
+  fi
+}
+
+# test_monitor_status_check_case_sensitive verifies that --check CI does not
+# match a check named "ci" (case-sensitive exact match). Uses --timeout since
+# the filtered check never matches and the loop would run indefinitely.
+test_monitor_status_check_case_sensitive() {
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  sleep() { command sleep "$@"; }
+  gh() {
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*"--paginate"*)
+        echo '{"total_count":1,"check_runs":[{"name":"ci","status":"in_progress","conclusion":null}]}'
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+  local exit_code=0
+  run_script_with_real_sleep monitor status --pr 42 --interval 1 --check CI --timeout 2s >/dev/null 2>&1 || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 2 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check CI should not match ci, should timeout exit 2 (got $exit_code)"
+  fi
+}
+
+# test_monitor_status_help_shows_check verifies that monitor status --help
+# includes the --check option in the usage output.
+test_monitor_status_help_shows_check() {
+  local output
+  output=$(bash "$script" monitor status --help 2>&1)
+  if echo "$output" | grep -qF -- "--check"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --help should list --check (output: $output)"
   fi
 }
