@@ -231,6 +231,7 @@ test_names+=(
   test_monitor_status_help_shows_timeout
   test_monitor_status_check_missing_value_flag
   test_monitor_status_check_missing_value_last
+  test_monitor_status_check_empty_value_rejected
   test_monitor_status_check_filters_to_named_check
   test_monitor_status_check_ignores_other_changes
   test_monitor_status_check_appears_after_delay
@@ -604,6 +605,7 @@ setup_mocks_monitor_check_appearing() {
   _MOCK_INITIAL="$1"
   _MOCK_CHANGED="$2"
   _MOCK_APPEAR_AT="${3:-3}"
+  _MOCK_CHECK_RUNS_CALLS=0
   _MOCK_COUNTER_FILE=$(mktemp)
   echo 0 > "$_MOCK_COUNTER_FILE"
   setup_mocks
@@ -615,7 +617,8 @@ setup_mocks_monitor_check_appearing() {
         echo "$HEAD_SHA"
         ;;
       *"check-runs"*"--paginate"*)
-        if [ "$call_num" -le "$_MOCK_APPEAR_AT" ]; then
+        _MOCK_CHECK_RUNS_CALLS=$((_MOCK_CHECK_RUNS_CALLS + 1))
+        if [ "$_MOCK_CHECK_RUNS_CALLS" -le "$_MOCK_APPEAR_AT" ]; then
           echo "$_MOCK_INITIAL"
         else
           echo "$_MOCK_CHANGED"
@@ -649,6 +652,19 @@ test_monitor_status_check_missing_value_last() {
   else
     fail=$((fail + 1))
     echo "FAIL: --check as last arg should exit 1 (exit=$exit_code, output: $output)"
+  fi
+}
+
+# test_monitor_status_check_empty_value_rejected verifies that --check "" is
+# rejected as a missing value.
+test_monitor_status_check_empty_value_rejected() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --check "" 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --check"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: --check \"\" should exit 1 (exit=$exit_code, output: $output)"
   fi
 }
 

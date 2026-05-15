@@ -456,6 +456,7 @@ cmd_monitor_status() {
         ;;
       --check)
         [ $# -ge 2 ] || die "missing value for --check"
+        [ -n "$2" ] || die "missing value for --check"
         [ "${2#-}" = "$2" ] || die "missing value for --check"
         check_filter="$2"; shift 2
         ;;
