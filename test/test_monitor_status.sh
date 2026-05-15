@@ -184,7 +184,13 @@ setup_mocks_monitor_no_change() {
 # so SECONDS-based timeout tests work correctly.
 run_script_with_real_sleep() {
   export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT _MOCK_CHECK_RUNS_CALLS
+  timeout 15 bash "$script" "$@" </dev/null
+}
+
+run_script() {
+  export -f git gh sleep _mock_counter_next
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT _MOCK_CHECK_RUNS_CALLS
   timeout 15 bash "$script" "$@" </dev/null
 }
 
