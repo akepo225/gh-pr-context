@@ -194,14 +194,6 @@ run_script() {
   timeout 15 bash "$script" "$@" </dev/null
 }
 
-# run_script runs the target script in a subshell with the mocked git, gh, sleep,
-# and _mock_counter_next functions exported so the script sees the test-provided behavior.
-run_script() {
-  export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
-  timeout 15 bash "$script" "$@" </dev/null
-}
-
 # cleanup_mock_counter removes the temporary file-based counter used by stateful mocks.
 cleanup_mock_counter() {
   [ -n "$_MOCK_COUNTER_FILE" ] && [ -f "$_MOCK_COUNTER_FILE" ] && rm -f "$_MOCK_COUNTER_FILE"
