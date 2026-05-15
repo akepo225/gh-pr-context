@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="0.2.4"
+version="0.2.5"
 
 die() {
   echo "error: $1" >&2
@@ -100,7 +100,8 @@ usage_monitor() {
   echo "usage: gh-pr-context monitor <sub-command> [options]"
   echo ""
   echo "sub-commands:"
-  echo "  status   Monitor CI check state changes"
+  echo "  status    Monitor CI check state changes"
+  echo "  comments  Monitor new comments on the PR"
   echo ""
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
@@ -111,6 +112,17 @@ usage_monitor() {
 
 usage_monitor_status() {
   echo "usage: gh-pr-context monitor status [options]"
+  echo ""
+  echo "options:"
+  echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
+  echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
+  echo "  --check <name>       Watch only the named check (case-sensitive)"
+  echo "  -h, --help           Show this message"
+}
+
+usage_monitor_comments() {
+  echo "usage: gh-pr-context monitor comments [options]"
   echo ""
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
@@ -427,6 +439,21 @@ capture_check_snapshot() {
   echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
 }
 
+# capture_comment_id_snapshot fetches top-level review comment IDs (excluding
+# replies) and issue comment IDs for a given PR, returning a sorted newline-
+# separated list suitable for set-difference comparison between poll cycles.
+capture_comment_id_snapshot() {
+  local owner_repo=$1 pr_number=$2
+  local review_ids issue_ids
+  review_ids=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate \
+    | jq -r '[.[] | select(.in_reply_to_id == null) | .id] | sort[]' | tr -d '\r') \
+    || die "failed to fetch review comments for PR #$pr_number"
+  issue_ids=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate \
+    | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
+    || die "failed to fetch issue comments for PR #$pr_number"
+  { echo "$review_ids"; echo "$issue_ids"; } | sort -n | grep -v '^$' || true
+}
+
 # cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
 # detecting state transitions (status/conclusion changes), new checks appearing,
 # checks disappearing, and new commits pushed to the PR. Prints terse `--- change`
@@ -552,8 +579,91 @@ cmd_monitor_status() {
   done
 }
 
+# cmd_monitor_comments polls the GitHub review comments and issue comments
+# endpoints at a configurable interval, detecting new top-level comment IDs
+# not present in the initial snapshot. Prints terse `--- change` notifications
+# and exits 0 on change, exits 1 on error, exits 2 on timeout.
+cmd_monitor_comments() {
+  local pr_number="" interval=30 timeout_input="" timeout_secs=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"; shift 2
+        if ! echo "$interval" | grep -qE '^[1-9][0-9]*$'; then
+          die "invalid --interval value: $interval (expected a positive integer)"
+        fi
+        ;;
+      --timeout)
+        [ $# -ge 2 ] || die "missing value for --timeout"
+        timeout_input="$2"; shift 2
+        timeout_secs=$(parse_duration "$timeout_input")
+        ;;
+      --check)
+        die "--check is not supported for monitor comments"
+        ;;
+      -h|--help) usage_monitor_comments; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  check_deps
+
+  if [ -z "$pr_number" ]; then
+    pr_number=$(resolve_pr_number)
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local initial_snapshot
+  initial_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+
+  SECONDS=0
+  while true; do
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
+    local sleep_for="$interval"
+    if [ -n "$timeout_secs" ]; then
+      local remaining=$((timeout_secs - SECONDS))
+      if [ "$remaining" -lt "$sleep_for" ]; then
+        sleep_for="$remaining"
+      fi
+    fi
+    sleep "$sleep_for"
+
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
+    local cur_snapshot
+    cur_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+
+    local new_ids
+    new_ids=$(comm -23 <(echo "$cur_snapshot") <(echo "$initial_snapshot"))
+    local new_count
+    new_count=$(echo "$new_ids" | grep -c '.' || true)
+
+    if [ "$new_count" -gt 0 ]; then
+      echo "--- change"
+      echo "type: new-comment"
+      echo "count: $new_count"
+      exit 0
+    fi
+  done
+}
+
 # cmd_monitor is the top-level dispatcher for the monitor command, routing
-# sub-commands (status) to their handlers. Exits 1 with usage when no
+# sub-commands (status, comments) to their handlers. Exits 1 with usage when no
 # sub-command is provided.
 cmd_monitor() {
   if [ $# -eq 0 ]; then
@@ -565,6 +675,7 @@ cmd_monitor() {
 
   case "$sub_command" in
     status) cmd_monitor_status "$@" ;;
+    comments) cmd_monitor_comments "$@" ;;
     -h|--help) usage_monitor; exit 0 ;;
     *) die "unknown monitor sub-command: $sub_command" ;;
   esac
