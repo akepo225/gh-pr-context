@@ -3,7 +3,7 @@
 *~
 .DS_Store
 .agents/
-.claude/skills/
+.claude/
 .trae/
 .windsurf/
 skills-lock.json
