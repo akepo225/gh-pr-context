@@ -184,13 +184,13 @@ setup_mocks_monitor_no_change() {
 # so SECONDS-based timeout tests work correctly.
 run_script_with_real_sleep() {
   export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT _MOCK_CHECK_RUNS_CALLS
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT
   timeout 15 bash "$script" "$@" </dev/null
 }
 
 run_script() {
   export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT _MOCK_CHECK_RUNS_CALLS
+  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE _MOCK_APPEAR_AT
   timeout 15 bash "$script" "$@" </dev/null
 }
 
@@ -603,7 +603,6 @@ setup_mocks_monitor_check_appearing() {
   _MOCK_INITIAL="$1"
   _MOCK_CHANGED="$2"
   _MOCK_APPEAR_AT="${3:-3}"
-  _MOCK_CHECK_RUNS_CALLS=0
   _MOCK_COUNTER_FILE=$(mktemp)
   echo 0 > "$_MOCK_COUNTER_FILE"
   setup_mocks
@@ -615,8 +614,7 @@ setup_mocks_monitor_check_appearing() {
         echo "$HEAD_SHA"
         ;;
       *"check-runs"*"--paginate"*)
-        _MOCK_CHECK_RUNS_CALLS=$((_MOCK_CHECK_RUNS_CALLS + 1))
-        if [ "$_MOCK_CHECK_RUNS_CALLS" -le "$_MOCK_APPEAR_AT" ]; then
+        if [ "$call_num" -le "$_MOCK_APPEAR_AT" ]; then
           echo "$_MOCK_INITIAL"
         else
           echo "$_MOCK_CHANGED"
@@ -738,7 +736,7 @@ test_monitor_status_check_ignores_other_changes() {
 test_monitor_status_check_appears_after_delay() {
   local initial='{"total_count":1,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null}]}'
   local changed='{"total_count":2,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
-  setup_mocks_monitor_check_appearing "$initial" "$changed" 2
+  setup_mocks_monitor_explicit_pr "$initial" "$changed"
   local output
   output=$(run_script monitor status --pr 42 --interval 1 --check CI 2>&1)
   cleanup_mock_counter
