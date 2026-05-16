@@ -8,6 +8,14 @@ die() {
   exit 1
 }
 
+require_bash_version() {
+  if [ "${BASH_VERSINFO[0]}" -lt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -lt 1 ]; }; then
+    die "bash 5.1+ is required"
+  fi
+}
+
+require_bash_version
+
 # Parse a duration string (<number><s|m|h>) and output seconds.
 # Exits 1 on invalid input (empty, bare number, negative, non-numeric).
 parse_duration() {
@@ -445,10 +453,9 @@ _timed_gh_api() {
     return 124
   fi
 
-  local stdout_file stderr_file timed_out_file
+  local stdout_file stderr_file
   stdout_file=$(mktemp) || return 1
   stderr_file=$(mktemp) || { rm -f "$stdout_file"; return 1; }
-  timed_out_file=$(mktemp) || { rm -f "$stdout_file" "$stderr_file"; return 1; }
 
   gh api "$@" >"$stdout_file" 2>"$stderr_file" &
   local api_pid=$!
@@ -460,7 +467,6 @@ _timed_gh_api() {
   if [ "$completed_pid" = "$timer_pid" ]; then
     kill "$api_pid" 2>/dev/null || true
     wait "$api_pid" 2>/dev/null || true
-    echo 1 > "$timed_out_file"
     rc=124
   else
     kill "$timer_pid" 2>/dev/null || true
@@ -472,7 +478,7 @@ _timed_gh_api() {
     cat "$stderr_file" >&2
   fi
 
-  rm -f "$stdout_file" "$stderr_file" "$timed_out_file"
+  rm -f "$stdout_file" "$stderr_file"
   return "$rc"
 }
 

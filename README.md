@@ -6,7 +6,7 @@ Token-efficient PR context CLI for LLM coding assistants. Wraps `gh api` to fetc
 
 - [gh](https://cli.github.com/) (authenticated)
 - [jq](https://jqlang.github.io/jq/)
-- bash
+- bash 5.1+
 
 ## Install
 
