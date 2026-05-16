@@ -7,6 +7,51 @@ _MOCK_SHA_COUNTER_FILE=""
 _MOCK_CHECK_COUNTER_FILE=""
 _MOCK_REVIEW_COUNTER_FILE=""
 _MOCK_ISSUE_COUNTER_FILE=""
+_MONITOR_ALL_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script="$_MONITOR_ALL_TEST_DIR/../gh-pr-context"
+
+# shellcheck source=/dev/null
+source "$script"
+
+contains_arg() {
+  local needle=$1 arg
+  shift
+  for arg in "$@"; do
+    if [[ "$arg" == *"$needle"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+is_pr_lookup_call() {
+  contains_arg "pulls?head=acme:feature-branch" "$@" && contains_arg "--paginate" "$@"
+}
+
+is_pr_sha_call() {
+  contains_arg "pulls/42" "$@" && contains_arg "--paginate" "$@" && contains_arg "--jq" "$@"
+}
+
+is_replies_call() {
+  contains_arg "pulls/comments/" "$@" && contains_arg "/replies" "$@"
+}
+
+is_check_runs_call() {
+  contains_arg "check-runs" "$@" && contains_arg "--paginate" "$@"
+}
+
+is_review_comments_call() {
+  contains_arg "pulls/42/comments" "$@" && contains_arg "--paginate" "$@"
+}
+
+is_issue_comments_call() {
+  contains_arg "issues/42/comments" "$@" && contains_arg "--paginate" "$@"
+}
+
+unexpected_gh_call() {
+  echo "gh: unexpected call: $*" >&2
+  exit 1
+}
 
 _mock_counter_next() {
   local file=$1 val
@@ -55,45 +100,41 @@ setup_mocks_monitor_all() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls?head=acme:feature-branch"*"--paginate"*) echo "42" ;;
-      *"pulls/42"*"--paginate"*"--jq"*)
-        _mock_counter_next "$_MOCK_SHA_COUNTER_FILE" >/dev/null
-        echo "$HEAD_SHA"
-        ;;
-      *"pulls/comments/"*"/replies"*)
-        echo "ERROR: replies endpoint should not be called" >&2
-        exit 1
-        ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_CHECKS"
-        else
-          echo "$_MOCK_CHANGED_CHECKS"
-        fi
-        ;;
-      *"pulls/42/comments"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_REVIEW_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_REVIEWS"
-        else
-          echo "$_MOCK_CHANGED_REVIEWS"
-        fi
-        ;;
-      *"issues/42/comments"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_ISSUE_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_ISSUES"
-        else
-          echo "$_MOCK_CHANGED_ISSUES"
-        fi
-        ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_lookup_call "$@"; then
+      echo "42"
+    elif is_pr_sha_call "$@"; then
+      _mock_counter_next "$_MOCK_SHA_COUNTER_FILE" >/dev/null
+      echo "$HEAD_SHA"
+    elif is_replies_call "$@"; then
+      echo "ERROR: replies endpoint should not be called" >&2
+      exit 1
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_CHECKS"
+      else
+        echo "$_MOCK_CHANGED_CHECKS"
+      fi
+    elif is_review_comments_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_REVIEW_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_REVIEWS"
+      else
+        echo "$_MOCK_CHANGED_REVIEWS"
+      fi
+    elif is_issue_comments_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_ISSUE_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_ISSUES"
+      else
+        echo "$_MOCK_CHANGED_ISSUES"
+      fi
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -107,21 +148,23 @@ setup_mocks_monitor_all_new_commit() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_SHA_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$HEAD_SHA"
-        else
-          echo "$NEW_SHA"
-        fi
-        ;;
-      *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_SHA_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$HEAD_SHA"
+      else
+        echo "$NEW_SHA"
+      fi
+    elif is_check_runs_call "$@"; then
+      echo "$_MOCK_INITIAL_CHECKS"
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -143,13 +186,17 @@ setup_mocks_monitor_all_no_change() {
     esac
   }
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      echo "$_MOCK_INITIAL_CHECKS"
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -163,21 +210,23 @@ setup_mocks_monitor_all_api_failure() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_CHECKS"
-        else
-          exit 1
-        fi
-        ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_CHECKS"
+      else
+        exit 1
+      fi
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -191,39 +240,37 @@ setup_mocks_monitor_all_comment_api_timeout() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_CHECKS"
-        else
-          echo "$_MOCK_CHANGED_CHECKS"
-        fi
-        ;;
-      *"pulls/42/comments"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_REVIEW_COUNTER_FILE")
-        if [ "$call_num" -eq 2 ]; then
-          exit 124
-        elif [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_REVIEWS"
-        else
-          echo "$_MOCK_CHANGED_REVIEWS"
-        fi
-        ;;
-      *"issues/42/comments"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_ISSUE_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_ISSUES"
-        else
-          echo "$_MOCK_CHANGED_ISSUES"
-        fi
-        ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_CHECKS"
+      else
+        echo "$_MOCK_CHANGED_CHECKS"
+      fi
+    elif is_review_comments_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_REVIEW_COUNTER_FILE")
+      if [ "$call_num" -eq 2 ]; then
+        exit 124
+      elif [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_REVIEWS"
+      else
+        echo "$_MOCK_CHANGED_REVIEWS"
+      fi
+    elif is_issue_comments_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_ISSUE_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_ISSUES"
+      else
+        echo "$_MOCK_CHANGED_ISSUES"
+      fi
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -237,28 +284,28 @@ setup_mocks_monitor_all_sha_api_timeout() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_SHA_COUNTER_FILE")
-        if [ "$call_num" -eq 2 ]; then
-          exit 124
-        fi
-        echo "$HEAD_SHA"
-        ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_CHECKS"
-        else
-          echo "$_MOCK_CHANGED_CHECKS"
-        fi
-        ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_SHA_COUNTER_FILE")
+      if [ "$call_num" -eq 2 ]; then
+        exit 124
+      fi
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_CHECKS"
+      else
+        echo "$_MOCK_CHANGED_CHECKS"
+      fi
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -272,23 +319,25 @@ setup_mocks_monitor_all_check_api_timeout() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -eq 2 ]; then
-          exit 124
-        elif [ "$call_num" -le 1 ]; then
-          echo "$_MOCK_INITIAL_CHECKS"
-        else
-          echo "$_MOCK_CHANGED_CHECKS"
-        fi
-        ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -eq 2 ]; then
+        exit 124
+      elif [ "$call_num" -le 1 ]; then
+        echo "$_MOCK_INITIAL_CHECKS"
+      else
+        echo "$_MOCK_CHANGED_CHECKS"
+      fi
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -310,20 +359,22 @@ setup_mocks_monitor_all_api_timeout_no_change() {
     esac
   }
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*)
-        local call_num
-        call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
-        if [ "$call_num" -eq 2 ]; then
-          exit 124
-        fi
-        echo "$_MOCK_INITIAL_CHECKS"
-        ;;
-      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
-      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      local call_num
+      call_num=$(_mock_counter_next "$_MOCK_CHECK_COUNTER_FILE")
+      if [ "$call_num" -eq 2 ]; then
+        exit 124
+      fi
+      echo "$_MOCK_INITIAL_CHECKS"
+    elif is_review_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_REVIEWS"
+    elif is_issue_comments_call "$@"; then
+      echo "$_MOCK_INITIAL_ISSUES"
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
@@ -332,18 +383,35 @@ setup_mocks_monitor_all_bootstrap_comment_api_timeout() {
   setup_counter_files
   setup_mocks
   gh() {
-    case "$*" in
-      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
-      *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
-      *"pulls/42/comments"*"--paginate"*) exit 124 ;;
-      *"issues/42/comments"*"--paginate"*) echo "[]" ;;
-      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
-    esac
+    if is_pr_sha_call "$@"; then
+      echo "$HEAD_SHA"
+    elif is_check_runs_call "$@"; then
+      echo "$_MOCK_INITIAL_CHECKS"
+    elif is_review_comments_call "$@"; then
+      exit 124
+    elif is_issue_comments_call "$@"; then
+      echo "[]"
+    else
+      unexpected_gh_call "$@"
+    fi
+  }
+}
+
+setup_mocks_monitor_all_autodetect_timeout() {
+  setup_counter_files
+  setup_mocks
+  gh() {
+    if is_pr_lookup_call "$@"; then
+      exit 124
+    else
+      unexpected_gh_call "$@"
+    fi
   }
 }
 
 run_script() {
-  export -f git gh sleep _mock_counter_next
+  export -f git gh sleep _mock_counter_next contains_arg is_pr_lookup_call is_pr_sha_call is_replies_call
+  export -f is_check_runs_call is_review_comments_call is_issue_comments_call unexpected_gh_call
   export HEAD_SHA NEW_SHA
   export _MOCK_INITIAL_CHECKS _MOCK_CHANGED_CHECKS
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
@@ -365,6 +433,7 @@ test_names+=(
   test_monitor_all_status_only
   test_monitor_all_comments_only
   test_monitor_all_mixed_changes_status_first
+  test_monitor_all_comment_id_sorting_for_comm
   test_monitor_all_new_commit
   test_monitor_all_check_flag_rejected
   test_monitor_all_missing_pr_value_exits_nonzero
@@ -378,6 +447,7 @@ test_names+=(
   test_monitor_all_timeout_exits_two
   test_monitor_all_explicit_pr
   test_monitor_all_auto_detect
+  test_monitor_all_auto_detect_timeout_exits_two
   test_monitor_all_accepts_timeout
   test_monitor_all_api_failure_exits_nonzero
   test_monitor_all_sha_api_timeout_continues
@@ -455,6 +525,27 @@ test_monitor_all_mixed_changes_status_first() {
   else
     fail=$((fail + 1))
     echo "FAIL: monitor --all mixed output ordering (output: $output)"
+  fi
+}
+
+test_monitor_all_comment_id_sorting_for_comm() {
+  local checks='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local initial_reviews='[]'
+  local initial_issues='[{"id":2}]'
+  local changed_reviews='[]'
+  local changed_issues='[{"id":2},{"id":10}]'
+  setup_mocks_monitor_all "$checks" "$checks" "$initial_reviews" "$initial_issues" "$changed_reviews" "$changed_issues"
+  local output exit_code=0
+  output=$(run_script monitor --all --pr 42 --interval 1 2>&1) || exit_code=$?
+  cleanup_mock_counters
+  if [ "$exit_code" -eq 0 ] \
+    && echo "$output" | grep -qF "type: new-comment" \
+    && echo "$output" | grep -qF "count: 1" \
+    && ! echo "$output" | grep -qF "not in sorted order"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all comment IDs should be sorted for comm (exit=$exit_code, output: $output)"
   fi
 }
 
@@ -628,6 +719,19 @@ test_monitor_all_auto_detect() {
   else
     fail=$((fail + 1))
     echo "FAIL: monitor --all auto-detect should work (output: $output)"
+  fi
+}
+
+test_monitor_all_auto_detect_timeout_exits_two() {
+  setup_mocks_monitor_all_autodetect_timeout
+  local output exit_code=0
+  output=$(run_script monitor --all --interval 1 --timeout 5m 2>&1) || exit_code=$?
+  cleanup_mock_counters
+  if [ "$exit_code" -eq 2 ] && echo "$output" | grep -qF "monitor timed out after 5m"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all auto-detect timeout should exit 2 (exit=$exit_code, output: $output)"
   fi
 }
 

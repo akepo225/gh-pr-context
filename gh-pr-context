@@ -129,7 +129,6 @@ usage_monitor_status() {
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
   echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
-  echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  -h, --help           Show this message"
 }
 
@@ -161,15 +160,24 @@ resolve_owner_repo() {
   echo "$owner_repo"
 }
 
+# resolve_pr_number prints the open PR number for the current branch. The
+# optional timeout argument is passed through to _timed_gh_api.
 resolve_pr_number() {
+  local timeout_secs="${1:-}"
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD) || die "failed to determine current branch"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
   local owner=${owner_repo%%/*}
   local repo=${owner_repo#*/}
-  local pr_data
-  pr_data=$(gh api "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r') || die "failed to look up PR for branch '$branch'"
+  local pr_data rc
+  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
+    :
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then return 124; fi
+    die "failed to look up PR for branch '$branch'"
+  fi
   if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
     die "no open PR found for branch '$branch'"
   fi
@@ -603,7 +611,7 @@ capture_comment_id_snapshot() {
     || die "failed to fetch review comments for PR #$pr_number"
   issue_ids=$(echo "$issue_raw" | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
     || die "failed to fetch issue comments for PR #$pr_number"
-  { echo "$review_ids"; echo "$issue_ids"; } | sort -n | grep -v '^$' || true
+  { echo "$review_ids"; echo "$issue_ids"; } | sort | grep -v '^$' || true
 }
 
 # cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
@@ -885,19 +893,31 @@ cmd_monitor_all() {
 
   check_deps
 
-  if [ -z "$pr_number" ]; then
-    pr_number=$(resolve_pr_number)
-  fi
-
-  local owner_repo
-  owner_repo=$(resolve_owner_repo)
-
   local _monitor_interrupted=0
   trap '_monitor_interrupted=1' INT TERM
 
   SECONDS=0
 
   local call_timeout api_rc=0
+  if [ -z "$pr_number" ]; then
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if pr_number=$(resolve_pr_number "$call_timeout"); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        echo "monitor timed out after $timeout_input" >&2
+        exit 2
+      fi
+      exit "$api_rc"
+    fi
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
   local prev_sha
   if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
     exit 2

@@ -20,6 +20,7 @@ setup_mocks() {
     esac
   }
   gh() {
+    echo "gh: unexpected call: $*" >&2
     exit 1
   }
   sleep() {
