@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 NEW_SHA="def456abc123def456abc123def456abc123def4"
@@ -40,6 +41,21 @@ cleanup_signal_tmpdir() {
   [ -n "$_SIGNAL_TMPDIR" ] && [ -d "$_SIGNAL_TMPDIR" ] && rm -rf "$_SIGNAL_TMPDIR"
 }
 
+# _run_and_signal starts the script in the background, waits SIGNAL_DELAY
+# seconds, sends SIGTERM, then reaps the child. Sets _signal_exit_code and
+# _signal_output. Uses || to avoid set -e exit on non-zero wait return.
+_run_and_signal() {
+  local outfile="$_SIGNAL_TMPDIR/out"
+  bash "$script" "$@" > "$outfile" 2>&1 &
+  local pid=$!
+
+  command sleep 4
+  kill -TERM "$pid" 2>/dev/null || true
+  _signal_exit_code=0
+  wait "$pid" 2>/dev/null || _signal_exit_code=$?
+  _signal_output=$(cat "$outfile")
+}
+
 test_names+=(
   test_signal_status_with_change_exits_130
   test_signal_status_no_change_exits_130_silent
@@ -66,7 +82,7 @@ test_signal_status_with_change_exits_130() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -81,35 +97,24 @@ test_signal_status_with_change_exits_130() {
           echo "$_MOCK_CHANGED"
         fi
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor status --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor status --pr 42 --interval 5
   cleanup_signal_tmpdir
   cleanup_mock_counter
 
-  if [ "$exit_code" -eq 130 ] \
-    && echo "$output" | grep -qF -- "--- change" \
-    && echo "$output" | grep -qF "check: CI" \
-    && echo "$output" | grep -qF "to: completed"; then
+  if [ "$_signal_exit_code" -eq 130 ] \
+    && echo "$_signal_output" | grep -qF -- "--- change" \
+    && echo "$_signal_output" | grep -qF "check: CI" \
+    && echo "$_signal_output" | grep -qF "to: completed"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: signal status with change (exit=$exit_code, output: $output)"
+    echo "FAIL: signal status with change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
 
@@ -125,38 +130,27 @@ test_signal_status_no_change_exits_130_silent() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
     case "$*" in
       *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
       *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor status --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor status --pr 42 --interval 5
   cleanup_signal_tmpdir
 
-  if [ "$exit_code" -eq 130 ] && [ -z "$output" ]; then
+  if [ "$_signal_exit_code" -eq 130 ] && [ -z "$_signal_output" ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: signal status no change (exit=$exit_code, output: $output)"
+    echo "FAIL: signal status no change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
 
@@ -175,7 +169,7 @@ test_signal_status_sigterm_with_change_exits_130() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -190,34 +184,23 @@ test_signal_status_sigterm_with_change_exits_130() {
           echo "$_MOCK_CHANGED"
         fi
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor status --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor status --pr 42 --interval 5
   cleanup_signal_tmpdir
   cleanup_mock_counter
 
-  if [ "$exit_code" -eq 130 ] \
-    && echo "$output" | grep -qF "check: Build" \
-    && echo "$output" | grep -qF "check: CI"; then
+  if [ "$_signal_exit_code" -eq 130 ] \
+    && echo "$_signal_output" | grep -qF "check: Build" \
+    && echo "$_signal_output" | grep -qF "check: CI"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: SIGTERM status with change (exit=$exit_code, output: $output)"
+    echo "FAIL: SIGTERM status with change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
 
@@ -239,7 +222,7 @@ test_signal_comments_with_change_exits_130() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -247,7 +230,7 @@ test_signal_comments_with_change_exits_130() {
     call_num=$(_mock_counter_next)
     case "$*" in
       *"pulls/comments/"*"/replies"*)
-        echo "ERROR: replies endpoint should not be called" >&2
+        echo "gh: replies endpoint should not be called: $*" >&2
         exit 1
         ;;
       *"pulls/42/comments"*"--paginate"*)
@@ -264,35 +247,24 @@ test_signal_comments_with_change_exits_130() {
           echo "$_MOCK_CHANGED_ISSUES"
         fi
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor comments --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor comments --pr 42 --interval 5
   cleanup_signal_tmpdir
   cleanup_mock_counter
 
-  if [ "$exit_code" -eq 130 ] \
-    && echo "$output" | grep -qF -- "--- change" \
-    && echo "$output" | grep -qF "type: new-comment" \
-    && echo "$output" | grep -qF "count: 1"; then
+  if [ "$_signal_exit_code" -eq 130 ] \
+    && echo "$_signal_output" | grep -qF -- "--- change" \
+    && echo "$_signal_output" | grep -qF "type: new-comment" \
+    && echo "$_signal_output" | grep -qF "count: 1"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: signal comments with change (exit=$exit_code, output: $output)"
+    echo "FAIL: signal comments with change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
 
@@ -309,7 +281,7 @@ test_signal_comments_no_change_exits_130_silent() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -320,31 +292,20 @@ test_signal_comments_no_change_exits_130_silent() {
       *"issues/42/comments"*"--paginate"*)
         echo "$_MOCK_ISSUES"
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor comments --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor comments --pr 42 --interval 5
   cleanup_signal_tmpdir
 
-  if [ "$exit_code" -eq 130 ] && [ -z "$output" ]; then
+  if [ "$_signal_exit_code" -eq 130 ] && [ -z "$_signal_output" ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: signal comments no change (exit=$exit_code, output: $output)"
+    echo "FAIL: signal comments no change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
 
@@ -361,7 +322,7 @@ test_signal_comments_sigterm_no_change_exits_130() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -372,30 +333,19 @@ test_signal_comments_sigterm_no_change_exits_130() {
       *"issues/42/comments"*"--paginate"*)
         echo "$_MOCK_ISSUES"
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 
   _SIGNAL_TMPDIR=$(mktemp -d)
-  local outfile="$_SIGNAL_TMPDIR/out"
-
   _export_signal_mocks
-  bash "$script" monitor comments --pr 42 --interval 5 > "$outfile" 2>&1 &
-  local pid=$!
-
-  command sleep 3
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  local exit_code=$?
-
-  local output
-  output=$(cat "$outfile")
+  _run_and_signal monitor comments --pr 42 --interval 5
   cleanup_signal_tmpdir
 
-  if [ "$exit_code" -eq 130 ] && [ -z "$output" ]; then
+  if [ "$_signal_exit_code" -eq 130 ] && [ -z "$_signal_output" ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    echo "FAIL: SIGTERM comments no change (exit=$exit_code, output: $output)"
+    echo "FAIL: SIGTERM comments no change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }

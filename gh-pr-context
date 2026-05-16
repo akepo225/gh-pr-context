@@ -459,7 +459,8 @@ capture_comment_id_snapshot() {
 # cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
 # detecting state transitions (status/conclusion changes), new checks appearing,
 # checks disappearing, and new commits pushed to the PR. Prints terse `--- change`
-# notifications and exits 0 on change, exits 1 on error, exits 2 on timeout.
+# notifications and exits 0 on change, exits 1 on error, exits 2 on timeout,
+# exits 130 on SIGINT/SIGTERM (after a final poll).
 cmd_monitor_status() {
   local pr_number="" interval=30 timeout_input="" timeout_secs="" check_filter=""
 
@@ -605,7 +606,8 @@ cmd_monitor_status() {
 # cmd_monitor_comments polls the GitHub review comments and issue comments
 # endpoints at a configurable interval, detecting new top-level comment IDs
 # not present in the initial snapshot. Prints terse `--- change` notifications
-# and exits 0 on change, exits 1 on error, exits 2 on timeout.
+# and exits 0 on change, exits 1 on error, exits 2 on timeout,
+# exits 130 on SIGINT/SIGTERM (after a final poll).
 cmd_monitor_comments() {
   local pr_number="" interval=30 timeout_input="" timeout_secs=""
 
