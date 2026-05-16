@@ -248,6 +248,10 @@ test_names+=(
   test_monitor_all_mixed_changes_status_first
   test_monitor_all_new_commit
   test_monitor_all_check_flag_rejected
+  test_monitor_all_missing_interval_value_exits_nonzero
+  test_monitor_all_invalid_interval_exits_nonzero
+  test_monitor_all_zero_interval_exits_nonzero
+  test_monitor_all_negative_interval_exits_nonzero
   test_monitor_all_timeout_exits_two
   test_monitor_all_explicit_pr
   test_monitor_all_auto_detect
@@ -348,12 +352,56 @@ test_monitor_all_new_commit() {
 
 test_monitor_all_check_flag_rejected() {
   local output exit_code=0
-  output=$(bash "$script" monitor --all --check CI 2>&1) || exit_code=$?
+  output=$(bash "$script" monitor --all --check ci.yml 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "unknown option: --check (only valid with monitor status)"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
     echo "FAIL: monitor --all --check should be rejected (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_all_missing_interval_value_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor --all --interval 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --interval"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all --interval should exit 1 with missing value message (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_all_invalid_interval_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor --all --interval abc 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: abc"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all --interval abc should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_all_zero_interval_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor --all --interval 0 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: 0"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all --interval 0 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_all_negative_interval_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor --all --interval -1 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: -1"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all --interval -1 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
   fi
 }
 

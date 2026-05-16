@@ -290,6 +290,7 @@ test_names+=(
   test_monitor_status_missing_interval_value_exits_nonzero
   test_monitor_status_invalid_interval_exits_nonzero
   test_monitor_status_zero_interval_exits_nonzero
+  test_monitor_status_negative_interval_exits_nonzero
   test_usage_lists_monitor
   test_monitor_status_timeout_exits_two
   test_monitor_status_timeout_stderr_message
@@ -574,19 +575,51 @@ test_monitor_status_missing_pr_value_exits_nonzero() {
 # test_monitor_status_missing_interval_value_exits_nonzero verifies that --interval
 # without a value exits 1 with a clear error message.
 test_monitor_status_missing_interval_value_exits_nonzero() {
-  assert_exit 1 "monitor status --interval without value exits 1" bash "$script" monitor status --interval
+  local output exit_code=0
+  output=$(bash "$script" monitor status --interval 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --interval"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval should exit 1 with missing value message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_invalid_interval_exits_nonzero verifies that --interval with
 # a non-numeric value exits 1.
 test_monitor_status_invalid_interval_exits_nonzero() {
-  assert_exit 1 "monitor status --interval abc exits 1" bash "$script" monitor status --interval abc
+  local output exit_code=0
+  output=$(bash "$script" monitor status --interval abc 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: abc"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval abc should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_zero_interval_exits_nonzero verifies that --interval 0 is
 # rejected (zero is not a positive integer).
 test_monitor_status_zero_interval_exits_nonzero() {
-  assert_exit 1 "monitor status --interval 0 exits 1" bash "$script" monitor status --interval 0
+  local output exit_code=0
+  output=$(bash "$script" monitor status --interval 0 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: 0"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval 0 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_status_negative_interval_exits_nonzero() {
+  local output exit_code=0
+  output=$(bash "$script" monitor status --interval -1 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: -1"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval -1 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_usage_lists_monitor verifies that the main --help output includes the monitor
