@@ -540,6 +540,7 @@ cmd_monitor_status() {
 
     local cur_sha
     if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then
+      [ "$_monitor_interrupted" -eq 1 ] && exit 130
       die "failed to re-resolve head SHA for PR #$pr_number"
     fi
 
@@ -553,6 +554,7 @@ cmd_monitor_status() {
 
     local cur_snapshot
     if ! cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" 2>&1); then
+      [ "$_monitor_interrupted" -eq 1 ] && exit 130
       die "failed to fetch check runs during poll"
     fi
     if [ -n "$check_filter" ]; then
@@ -676,7 +678,10 @@ cmd_monitor_comments() {
     fi
 
     local cur_snapshot
-    cur_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+    cur_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number") || {
+      [ "$_monitor_interrupted" -eq 1 ] && exit 130
+      die "failed to fetch comments during poll"
+    }
 
     local new_ids
     new_ids=$(comm -23 <(echo "$cur_snapshot") <(echo "$initial_snapshot"))
