@@ -810,6 +810,11 @@ cmd_monitor_comments() {
   local owner_repo
   owner_repo=$(resolve_owner_repo)
 
+  local _monitor_interrupted=0
+  trap '_monitor_interrupted=1' INT TERM
+
+  SECONDS=0
+
   local initial_snapshot call_timeout api_rc=0
   if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
     exit 2
@@ -825,10 +830,6 @@ cmd_monitor_comments() {
     die "failed to fetch comments for PR #$pr_number"
   fi
 
-  local _monitor_interrupted=0
-  trap '_monitor_interrupted=1' INT TERM
-
-  SECONDS=0
   while true; do
     if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
       echo "monitor timed out after $timeout_input" >&2
