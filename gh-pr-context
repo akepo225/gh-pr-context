@@ -158,9 +158,10 @@ resolve_pr_number() {
 
 resolve_pr_head_sha() {
   local pr_number=$1
+  local timeout_secs="${2:-}"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  gh api "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
+  _timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
 validate_since_format() {
@@ -430,14 +431,81 @@ cmd_logs() {
   done <<< "$failed_pairs"
 }
 
+# _timed_gh_api runs gh api with an optional seconds deadline. It returns 124
+# when the deadline expires, matching the conventional timeout exit code.
+_timed_gh_api() {
+  local timeout_secs="${1:-}"
+  shift
+
+  if [ -z "$timeout_secs" ]; then
+    gh api "$@"
+    return
+  fi
+  if [ "$timeout_secs" -le 0 ]; then
+    return 124
+  fi
+
+  local stdout_file stderr_file timed_out_file
+  stdout_file=$(mktemp) || return 1
+  stderr_file=$(mktemp) || { rm -f "$stdout_file"; return 1; }
+  timed_out_file=$(mktemp) || { rm -f "$stdout_file" "$stderr_file"; return 1; }
+
+  gh api "$@" >"$stdout_file" 2>"$stderr_file" &
+  local api_pid=$!
+  command sleep "$timeout_secs" &
+  local timer_pid=$!
+
+  local rc=0 completed_pid=""
+  wait -n -p completed_pid "$api_pid" "$timer_pid" || rc=$?
+  if [ "$completed_pid" = "$timer_pid" ]; then
+    kill "$api_pid" 2>/dev/null || true
+    wait "$api_pid" 2>/dev/null || true
+    echo 1 > "$timed_out_file"
+    rc=124
+  else
+    kill "$timer_pid" 2>/dev/null || true
+    wait "$timer_pid" 2>/dev/null || true
+  fi
+
+  if [ "$rc" -ne 124 ]; then
+    cat "$stdout_file"
+    cat "$stderr_file" >&2
+  fi
+
+  rm -f "$stdout_file" "$stderr_file" "$timed_out_file"
+  return "$rc"
+}
+
+monitor_call_timeout() {
+  local timeout_secs="${1:-}" timeout_input="${2:-}"
+  if [ -z "$timeout_secs" ]; then
+    echo ""
+    return 0
+  fi
+
+  local remaining=$((timeout_secs - SECONDS))
+  if [ "$remaining" -le 0 ]; then
+    echo "monitor timed out after $timeout_input" >&2
+    return 2
+  fi
+  echo "$remaining"
+}
+
+monitor_api_timeout_warning() {
+  echo "gh api call timed out; retrying next poll" >&2
+}
+
 # capture_check_snapshot fetches check-runs for a given SHA via the GitHub API
 # and returns a normalized JSON array of {name, status, conclusion} objects
 # sorted by check name, suitable for diffing between poll cycles.
 capture_check_snapshot() {
-  local owner_repo=$1 sha=$2
+  local owner_repo=$1 sha=$2 timeout_secs="${3:-}"
   local checks_json
-  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
-    || die "failed to fetch check runs for SHA $sha"
+  if checks_json=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/commits/$sha/check-runs" --paginate); then
+    :
+  else
+    return $?
+  fi
   echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
 }
 
@@ -507,7 +575,8 @@ cmd_monitor_status() {
     || die "failed to resolve head SHA for PR #$pr_number"
 
   local prev_snapshot
-  prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha")
+  prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha") \
+    || die "failed to fetch check runs for SHA $prev_sha"
   if [ -n "$check_filter" ]; then
     prev_snapshot=$(echo "$prev_snapshot" | jq --arg name "$check_filter" 'map(select(.name == $name))')
   fi
@@ -539,7 +608,20 @@ cmd_monitor_status() {
     fi
 
     local cur_sha
-    if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then
+    local call_timeout
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    local api_rc=0
+    if cur_sha=$(resolve_pr_head_sha "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
       die "failed to re-resolve head SHA for PR #$pr_number"
     fi
 
@@ -552,7 +634,18 @@ cmd_monitor_status() {
     fi
 
     local cur_snapshot
-    if ! cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" 2>&1); then
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
       die "failed to fetch check runs during poll"
     fi
     if [ -n "$check_filter" ]; then
