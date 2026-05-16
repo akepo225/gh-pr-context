@@ -754,7 +754,7 @@ cmd_monitor_comments() {
         timeout_secs=$(parse_duration "$timeout_input")
         ;;
       --check)
-        die "--check is not supported for monitor comments"
+        die "unknown option: --check (only valid with monitor status)"
         ;;
       -h|--help) usage_monitor_comments; exit 0 ;;
       *) die "unknown option: $1" ;;
