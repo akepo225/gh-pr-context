@@ -10,6 +10,16 @@ _mock_counter_next() {
   echo "$val"
 }
 
+_mock_call_should_timeout() {
+  local call_num=$1 timeout_call
+  for timeout_call in $_MOCK_TIMEOUT_CALLS; do
+    if [ "$call_num" = "$timeout_call" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 setup_mocks() {
   git() {
     case "$*" in
@@ -175,17 +185,95 @@ setup_mocks_monitor_comments_api_failure() {
   }
 }
 
+setup_mocks_monitor_comments_api_timeout() {
+  _MOCK_INITIAL_REVIEWS="$1"
+  _MOCK_INITIAL_ISSUES="$2"
+  _MOCK_CHANGED_REVIEWS="$3"
+  _MOCK_CHANGED_ISSUES="$4"
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  setup_mocks
+  _MOCK_TIMEOUT_CALLS="$5"
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    if _mock_call_should_timeout "$call_num"; then
+      exit 124
+    fi
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*)
+        echo "abc123def456abc123def456abc123def456abc1"
+        ;;
+      *"pulls/comments/"*"/replies"*)
+        echo "ERROR: replies endpoint should not be called" >&2
+        exit 1
+        ;;
+      *"pulls/42/comments"*"--paginate"*)
+        if [ "$call_num" -le 2 ]; then
+          echo "$_MOCK_INITIAL_REVIEWS"
+        else
+          echo "$_MOCK_CHANGED_REVIEWS"
+        fi
+        ;;
+      *"issues/42/comments"*"--paginate"*)
+        if [ "$call_num" -le 3 ]; then
+          echo "$_MOCK_INITIAL_ISSUES"
+        else
+          echo "$_MOCK_CHANGED_ISSUES"
+        fi
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
+setup_mocks_monitor_comments_api_timeout_no_change() {
+  _MOCK_INITIAL_REVIEWS="$1"
+  _MOCK_INITIAL_ISSUES="$2"
+  _MOCK_TIMEOUT_CALLS="$3"
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  sleep() { command sleep "$@"; }
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    if _mock_call_should_timeout "$call_num"; then
+      exit 124
+    fi
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*)
+        echo "abc123def456abc123def456abc123def456abc1"
+        ;;
+      *"pulls/42/comments"*"--paginate"*)
+        echo "$_MOCK_INITIAL_REVIEWS"
+        ;;
+      *"issues/42/comments"*"--paginate"*)
+        echo "$_MOCK_INITIAL_ISSUES"
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
 run_script() {
-  export -f git gh sleep _mock_counter_next
+  export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
-  export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE
+  export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE _MOCK_TIMEOUT_CALLS
   timeout 15 bash "$script" "$@" </dev/null
 }
 
 run_script_with_real_sleep() {
-  export -f git gh sleep _mock_counter_next
+  export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
-  export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE
+  export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE _MOCK_TIMEOUT_CALLS
   timeout 15 bash "$script" "$@" </dev/null
 }
 
@@ -216,6 +304,8 @@ test_names+=(
   test_monitor_comments_negative_interval_exits_nonzero
   test_monitor_comments_missing_timeout_value_exits_nonzero
   test_monitor_comments_invalid_timeout_exits_nonzero
+  test_monitor_comments_api_timeout_continues
+  test_monitor_comments_overall_timeout_after_api_timeout
 )
 
 test_monitor_comments_new_review_comment() {
@@ -512,4 +602,41 @@ test_monitor_comments_missing_timeout_value_exits_nonzero() {
 test_monitor_comments_invalid_timeout_exits_nonzero() {
   setup_mocks
   assert_exit 1 "monitor comments --timeout invalid exits 1" run_script monitor comments --timeout abc
+}
+
+test_monitor_comments_api_timeout_continues() {
+  local initial_reviews='[{"id":101,"in_reply_to_id":null}]'
+  local initial_issues='[]'
+  local changed_reviews='[{"id":101,"in_reply_to_id":null},{"id":102,"in_reply_to_id":null}]'
+  local changed_issues='[]'
+  setup_mocks_monitor_comments_api_timeout "$initial_reviews" "$initial_issues" "$changed_reviews" "$changed_issues" "4"
+  local output exit_code=0
+  output=$(run_script monitor comments --pr 42 --interval 1 --timeout 5m 2>&1) || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ] \
+    && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
+    && echo "$output" | grep -qF "type: new-comment" \
+    && echo "$output" | grep -qF "count: 1"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: API timeout should warn, retry, and detect change (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_comments_overall_timeout_after_api_timeout() {
+  local initial_reviews='[{"id":101,"in_reply_to_id":null}]'
+  local initial_issues='[]'
+  setup_mocks_monitor_comments_api_timeout_no_change "$initial_reviews" "$initial_issues" "3"
+  local output exit_code=0
+  output=$(run_script_with_real_sleep monitor comments --pr 42 --interval 1 --timeout 2s 2>&1) || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 2 ] \
+    && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
+    && echo "$output" | grep -qF "monitor timed out after 2s"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: overall timeout should still fire after API timeout (exit=$exit_code, output: $output)"
+  fi
 }
