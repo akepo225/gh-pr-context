@@ -810,8 +810,20 @@ cmd_monitor_comments() {
   local owner_repo
   owner_repo=$(resolve_owner_repo)
 
-  local initial_snapshot
-  initial_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+  local initial_snapshot call_timeout api_rc=0
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if initial_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to fetch comments for PR #$pr_number"
+  fi
 
   local _monitor_interrupted=0
   trap '_monitor_interrupted=1' INT TERM
@@ -839,8 +851,21 @@ cmd_monitor_comments() {
       exit 2
     fi
 
-    local cur_snapshot
-    cur_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+    local cur_snapshot call_timeout api_rc=0
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
+      die "failed to fetch comments during poll"
+    fi
 
     local new_ids
     new_ids=$(comm -23 <(echo "$cur_snapshot") <(echo "$initial_snapshot"))
