@@ -27,7 +27,7 @@ Verify: `gh-pr-context --help`. Requires `gh` (authenticated), `jq`, and `bash`.
 
 ## When to invoke
 
-Invoke BEFORE creating a PR to run the pre-PR checks (steps 1-3), then create the PR (step 4), and proceed with post-PR review (steps 5-7). Do NOT invoke after pushing as a post-hoc review.
+Invoke BEFORE creating a PR to run the pre-PR checks (steps 1-3), then create the PR (step 4), and proceed with post-PR review (steps 5-8). Do NOT invoke after pushing as a post-hoc review.
 
 ## Workflow
 
@@ -88,7 +88,11 @@ Read the output carefully. For each comment or failed check, determine if action
 
 Address every legitimate issue from steps 1, 2, 3, and 5. Dismiss only clearly false positives — explain dismissals in the commit message or PR description.
 
-### 7. Monitor & Iterate
+### 7. ☑ Follow-up items
+
+If the review uncovered improvements, refactors, or feature requests that are valid but out of scope for this PR: (1) If `/to-issues` is available, use it to create new GitHub issues for each follow-up, tagged `needs-triage`. (2) Otherwise, list the follow-ups in the PR description under a `## Follow-up` heading. Do NOT implement them in this PR.
+
+### 8. Monitor & Iterate
 
 - Re-run `gh-pr-context comments --since last-commit` after each push to catch new feedback.
 - Re-run `gh-pr-context status` and `gh-pr-context logs` to verify CI.
