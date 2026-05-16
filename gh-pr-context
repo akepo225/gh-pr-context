@@ -8,6 +8,7 @@ die() {
   exit 1
 }
 
+# require_bash_version enforces Bash 5.1+, exiting via die on older shells.
 require_bash_version() {
   if [ "${BASH_VERSINFO[0]}" -lt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -lt 1 ]; }; then
     die "bash 5.1+ is required"
@@ -175,6 +176,8 @@ resolve_pr_number() {
   echo "$pr_data"
 }
 
+# resolve_pr_head_sha prints the remote PR head SHA. The optional timeout
+# argument is passed through to _timed_gh_api, so callers can observe exit 124.
 resolve_pr_head_sha() {
   local pr_number=$1
   local timeout_secs="${2:-}"
@@ -493,6 +496,8 @@ _timed_gh_api() {
   return "$rc"
 }
 
+# monitor_call_timeout converts the remaining overall monitor budget into a
+# per-call deadline, returning 2 after printing the timeout message if exhausted.
 monitor_call_timeout() {
   local timeout_secs="${1:-}" timeout_input="${2:-}"
   if [ -z "$timeout_secs" ]; then
@@ -508,6 +513,7 @@ monitor_call_timeout() {
   echo "$remaining"
 }
 
+# monitor_api_timeout_warning emits the retry notice for per-call gh api timeouts.
 monitor_api_timeout_warning() {
   echo "gh api call timed out; retrying next poll" >&2
 }
@@ -526,6 +532,8 @@ capture_check_snapshot() {
   echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
 }
 
+# compute_status_diff returns a JSON array of check status/conclusion changes
+# between two normalized check snapshots, including absent/new checks.
 compute_status_diff() {
   local prev_status_snapshot=$1 cur_status_snapshot=$2
   printf '%s\n%s\n' "$prev_status_snapshot" "$cur_status_snapshot" | jq -s '
@@ -824,6 +832,9 @@ cmd_monitor_comments() {
   done
 }
 
+# cmd_monitor_all polls check status and comments in the same loop. It prints
+# all detected status changes before a new-comment summary and uses the same
+# exit codes as other monitor commands: 0 change, 1 error, 2 timeout, 130 signal.
 cmd_monitor_all() {
   local pr_number="" interval=30 timeout_input="" timeout_secs=""
 

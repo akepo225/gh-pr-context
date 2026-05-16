@@ -202,6 +202,7 @@ test_names+=(
   test_monitor_comments_explicit_pr
   test_monitor_comments_auto_detect
   test_monitor_comments_no_pr_exits_nonzero
+  test_monitor_comments_no_pr_stderr_message
   test_monitor_comments_api_failure_exits_nonzero
   test_monitor_comments_help_exits_zero
   test_monitor_comments_missing_pr_value_exits_nonzero
@@ -408,6 +409,18 @@ test_monitor_comments_no_pr_exits_nonzero() {
   else
     fail=$((fail + 1))
     echo "FAIL: no PR should exit non-zero"
+  fi
+}
+
+test_monitor_comments_no_pr_stderr_message() {
+  setup_mocks_monitor_comments_no_pr
+  local output
+  output=$(run_script monitor comments --interval 1 2>&1) || true
+  if echo "$output" | grep -qF "no open PR found for branch 'feature-branch'"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: no PR stderr should contain no-open-PR message (output: $output)"
   fi
 }
 

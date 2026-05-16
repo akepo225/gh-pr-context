@@ -63,6 +63,7 @@ test_names+=(
   test_signal_comments_with_change_exits_130
   test_signal_comments_no_change_exits_130_silent
   test_signal_comments_sigterm_no_change_exits_130
+  test_signal_all_with_change_exits_130
 )
 
 # test_signal_status_with_change_exits_130 verifies that a signal during
@@ -347,5 +348,68 @@ test_signal_comments_sigterm_no_change_exits_130() {
   else
     fail=$((fail + 1))
     echo "FAIL: SIGTERM comments no change (exit=$_signal_exit_code, output: $_signal_output)"
+  fi
+}
+
+# test_signal_all_with_change_exits_130 verifies that a signal during
+# monitor --all triggers a final combined poll, emits detected status changes,
+# and exits 130. Uses SIGTERM because the script traps TERM and INT identically.
+test_signal_all_with_change_exits_130() {
+  _skip_check "signal all with change" && return 0
+
+  _MOCK_INITIAL='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  _MOCK_CHANGED='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  _MOCK_INITIAL_REVIEWS='[]'
+  _MOCK_INITIAL_ISSUES='[]'
+  _MOCK_CHANGED_REVIEWS='[]'
+  _MOCK_CHANGED_ISSUES='[]'
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  sleep() { command sleep "$@"; }
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
+    esac
+  }
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"pulls/comments/"*"/replies"*)
+        echo "gh: replies endpoint should not be called: $*" >&2
+        exit 1
+        ;;
+      *"check-runs"*"--paginate"*)
+        if [ "$call_num" -le 2 ]; then
+          echo "$_MOCK_INITIAL"
+        else
+          echo "$_MOCK_CHANGED"
+        fi
+        ;;
+      *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
+      *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
+    esac
+  }
+
+  _SIGNAL_TMPDIR=$(mktemp -d)
+  _export_signal_mocks
+  _run_and_signal monitor --all --pr 42 --interval 5
+  cleanup_signal_tmpdir
+  cleanup_mock_counter
+
+  if [ "$_signal_exit_code" -eq 130 ] \
+    && echo "$_signal_output" | grep -qF -- "--- change" \
+    && echo "$_signal_output" | grep -qF "type: status" \
+    && echo "$_signal_output" | grep -qF "check: CI" \
+    && echo "$_signal_output" | grep -qF "to: completed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: signal all with change (exit=$_signal_exit_code, output: $_signal_output)"
   fi
 }
