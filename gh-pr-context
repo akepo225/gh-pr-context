@@ -511,6 +511,9 @@ cmd_monitor_status() {
     prev_snapshot=$(echo "$prev_snapshot" | jq --arg name "$check_filter" 'map(select(.name == $name))')
   fi
 
+  local _monitor_interrupted=0
+  trap '_monitor_interrupted=1' INT TERM
+
   SECONDS=0
   while true; do
     if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
@@ -525,9 +528,11 @@ cmd_monitor_status() {
         sleep_for="$remaining"
       fi
     fi
-    sleep "$sleep_for"
+    sleep "$sleep_for" || true
 
-    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+    if [ "$_monitor_interrupted" -eq 1 ]; then
+      : # skip timeout check on interrupt
+    elif [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
       echo "monitor timed out after $timeout_input" >&2
       exit 2
     fi
@@ -541,6 +546,7 @@ cmd_monitor_status() {
       echo "--- change"
       echo "type: new-commit"
       echo "sha: $cur_sha"
+      if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
       exit 0
     fi
 
@@ -585,8 +591,11 @@ cmd_monitor_status() {
         "from: \(.from)\n" +
         "to: \(.to)" +
         if (.conclusion != null and .to != "absent") then "\nconclusion: \(.conclusion)" else "" end'
+      if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
       exit 0
     fi
+
+    if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
 
     prev_sha="$cur_sha"
     prev_snapshot="$cur_snapshot"
@@ -638,6 +647,9 @@ cmd_monitor_comments() {
   local initial_snapshot
   initial_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
 
+  local _monitor_interrupted=0
+  trap '_monitor_interrupted=1' INT TERM
+
   SECONDS=0
   while true; do
     if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
@@ -652,9 +664,11 @@ cmd_monitor_comments() {
         sleep_for="$remaining"
       fi
     fi
-    sleep "$sleep_for"
+    sleep "$sleep_for" || true
 
-    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+    if [ "$_monitor_interrupted" -eq 1 ]; then
+      : # skip timeout check on interrupt
+    elif [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
       echo "monitor timed out after $timeout_input" >&2
       exit 2
     fi
@@ -671,8 +685,11 @@ cmd_monitor_comments() {
       echo "--- change"
       echo "type: new-comment"
       echo "count: $new_count"
+      if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
       exit 0
     fi
+
+    if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
   done
 }
 
