@@ -530,13 +530,27 @@ capture_check_snapshot() {
 # replies) and issue comment IDs for a given PR, returning a sorted newline-
 # separated list suitable for set-difference comparison between poll cycles.
 capture_comment_id_snapshot() {
-  local owner_repo=$1 pr_number=$2
+  local owner_repo=$1 pr_number=$2 timeout_secs="${3:-}"
+  local review_raw issue_raw review_rc issue_rc
+  if review_raw=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number/comments" --paginate); then
+    :
+  else
+    review_rc=$?
+    if [ "$review_rc" -eq 124 ]; then return 124; fi
+    die "failed to fetch review comments for PR #$pr_number"
+  fi
+  if issue_raw=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/issues/$pr_number/comments" --paginate); then
+    :
+  else
+    issue_rc=$?
+    if [ "$issue_rc" -eq 124 ]; then return 124; fi
+    die "failed to fetch issue comments for PR #$pr_number"
+  fi
+
   local review_ids issue_ids
-  review_ids=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate \
-    | jq -r '[.[] | select(.in_reply_to_id == null) | .id] | sort[]' | tr -d '\r') \
+  review_ids=$(echo "$review_raw" | jq -r '[.[] | select(.in_reply_to_id == null) | .id] | sort[]' | tr -d '\r') \
     || die "failed to fetch review comments for PR #$pr_number"
-  issue_ids=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate \
-    | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
+  issue_ids=$(echo "$issue_raw" | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
     || die "failed to fetch issue comments for PR #$pr_number"
   { echo "$review_ids"; echo "$issue_ids"; } | sort -n | grep -v '^$' || true
 }
@@ -921,7 +935,20 @@ cmd_monitor_all() {
     fi
 
     local cur_comment_snapshot
-    cur_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
+      die "failed to fetch comments during poll"
+    fi
 
     local status_changes
     status_changes=$(printf '%s\n%s\n' "$prev_status_snapshot" "$cur_status_snapshot" | jq -s '
