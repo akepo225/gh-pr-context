@@ -526,6 +526,30 @@ capture_check_snapshot() {
   echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
 }
 
+compute_status_diff() {
+  local prev_status_snapshot=$1 cur_status_snapshot=$2
+  printf '%s\n%s\n' "$prev_status_snapshot" "$cur_status_snapshot" | jq -s '
+    . as $snapshots |
+    ($snapshots[0]) as $old |
+    ($snapshots[1]) as $new |
+    (($old | map(.name)) + ($new | map(.name))) | unique | sort |
+    map(
+      . as $name |
+      ($old | map(select(.name == $name)) | first) as $o |
+      ($new | map(select(.name == $name)) | first) as $n |
+      if $o == null then
+        {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
+      elif $n == null then
+        {check: $name, from: $o.status, to: "absent", conclusion: null}
+      elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
+        {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
+      else
+        empty
+      end
+    )
+  '
+}
+
 # capture_comment_id_snapshot fetches top-level review comment IDs (excluding
 # replies) and issue comment IDs for a given PR, returning a sorted newline-
 # separated list suitable for set-difference comparison between poll cycles.
@@ -684,26 +708,7 @@ cmd_monitor_status() {
     fi
 
     local changes
-    changes=$(printf '%s\n%s\n' "$prev_snapshot" "$cur_snapshot" | jq -s '
-      . as $snapshots |
-      ($snapshots[0]) as $old |
-      ($snapshots[1]) as $new |
-      (($old | map(.name)) + ($new | map(.name))) | unique | sort |
-      map(
-        . as $name |
-        ($old | map(select(.name == $name)) | first) as $o |
-        ($new | map(select(.name == $name)) | first) as $n |
-        if $o == null then
-          {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
-        elif $n == null then
-          {check: $name, from: $o.status, to: "absent", conclusion: null}
-        elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
-          {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
-        else
-          empty
-        end
-      )
-    ')
+    changes=$(compute_status_diff "$prev_snapshot" "$cur_snapshot")
 
     local change_count
     change_count=$(echo "$changes" | jq 'length' | tr -d '\r')
@@ -951,26 +956,7 @@ cmd_monitor_all() {
     fi
 
     local status_changes
-    status_changes=$(printf '%s\n%s\n' "$prev_status_snapshot" "$cur_status_snapshot" | jq -s '
-      . as $snapshots |
-      ($snapshots[0]) as $old |
-      ($snapshots[1]) as $new |
-      (($old | map(.name)) + ($new | map(.name))) | unique | sort |
-      map(
-        . as $name |
-        ($old | map(select(.name == $name)) | first) as $o |
-        ($new | map(select(.name == $name)) | first) as $n |
-        if $o == null then
-          {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
-        elif $n == null then
-          {check: $name, from: $o.status, to: "absent", conclusion: null}
-        elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
-          {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
-        else
-          empty
-        end
-      )
-    ')
+    status_changes=$(compute_status_diff "$prev_status_snapshot" "$cur_status_snapshot")
 
     local status_change_count
     status_change_count=$(echo "$status_changes" | jq 'length' | tr -d '\r')

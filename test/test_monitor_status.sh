@@ -24,9 +24,9 @@ _mock_call_should_timeout() {
   return 1
 }
 
-# setup_mocks defines mocked `git` and `sleep` shell functions used by the test harness;
+# setup_mocks defines mocked `git`, `gh`, and `sleep` shell functions used by the test harness;
 # `git` responds with fixed repo URL and branch values for known invocations and exits
-# nonzero for others; `sleep` is a no-op so polling tests complete instantly.
+# nonzero for others; `gh` defaults to fail closed; `sleep` is a no-op so polling tests complete instantly.
 setup_mocks() {
   _MOCK_TIMEOUT_CALLS=""
   git() {
@@ -36,6 +36,9 @@ setup_mocks() {
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
       *) exit 1 ;;
     esac
+  }
+  gh() {
+    exit 1
   }
   sleep() {
     :
@@ -576,7 +579,8 @@ test_monitor_status_missing_pr_value_exits_nonzero() {
 # without a value exits 1 with a clear error message.
 test_monitor_status_missing_interval_value_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor status --interval 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor status --interval 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --interval"; then
     pass=$((pass + 1))
   else
@@ -589,7 +593,8 @@ test_monitor_status_missing_interval_value_exits_nonzero() {
 # a non-numeric value exits 1.
 test_monitor_status_invalid_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor status --interval abc 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor status --interval abc 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: abc"; then
     pass=$((pass + 1))
   else
@@ -602,7 +607,8 @@ test_monitor_status_invalid_interval_exits_nonzero() {
 # rejected (zero is not a positive integer).
 test_monitor_status_zero_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor status --interval 0 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor status --interval 0 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: 0"; then
     pass=$((pass + 1))
   else
@@ -613,7 +619,8 @@ test_monitor_status_zero_interval_exits_nonzero() {
 
 test_monitor_status_negative_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor status --interval -1 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor status --interval -1 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: -1"; then
     pass=$((pass + 1))
   else
