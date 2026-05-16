@@ -14,10 +14,21 @@ _mock_counter_next() {
   echo "$val"
 }
 
-# setup_mocks defines mocked `git` and `sleep` shell functions used by the test harness;
+_mock_call_should_timeout() {
+  local call_num=$1 timeout_call
+  for timeout_call in $_MOCK_TIMEOUT_CALLS; do
+    if [ "$call_num" = "$timeout_call" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# setup_mocks defines mocked `git`, `gh`, and `sleep` shell functions used by the test harness;
 # `git` responds with fixed repo URL and branch values for known invocations and exits
-# nonzero for others; `sleep` is a no-op so polling tests complete instantly.
+# nonzero for others; `gh` defaults to fail closed; `sleep` is a no-op so polling tests complete instantly.
 setup_mocks() {
+  _MOCK_TIMEOUT_CALLS=""
   git() {
     case "$*" in
       "rev-parse --git-dir") echo ".git" ;;
@@ -25,6 +36,9 @@ setup_mocks() {
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
       *) exit 1 ;;
     esac
+  }
+  gh() {
+    exit 1
   }
   sleep() {
     :
@@ -156,6 +170,64 @@ setup_mocks_monitor_api_failure() {
   }
 }
 
+setup_mocks_monitor_api_timeout() {
+  _MOCK_INITIAL="$1"
+  _MOCK_CHANGED="$2"
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  setup_mocks
+  _MOCK_TIMEOUT_CALLS="$3"
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    if _mock_call_should_timeout "$call_num"; then
+      exit 124
+    fi
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*)
+        echo "$HEAD_SHA"
+        ;;
+      *"check-runs"*"--paginate"*)
+        if [ "$call_num" -le 2 ]; then
+          echo "$_MOCK_INITIAL"
+        else
+          echo "$_MOCK_CHANGED"
+        fi
+        ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
+setup_mocks_monitor_api_timeout_no_change() {
+  _MOCK_INITIAL="$1"
+  _MOCK_CHANGED="$1"
+  _MOCK_TIMEOUT_CALLS="$2"
+  _MOCK_COUNTER_FILE=$(mktemp)
+  echo 0 > "$_MOCK_COUNTER_FILE"
+  sleep() { command sleep "$@"; }
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    local call_num
+    call_num=$(_mock_counter_next)
+    if _mock_call_should_timeout "$call_num"; then
+      exit 124
+    fi
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL" ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
 # setup_mocks_monitor_no_change configures git/gh mocks where data never changes,
 # suitable for timeout tests. Defines a sleep() wrapper that calls the real system
 # sleep so SECONDS advances correctly and no leaked mock from other tests interferes.
@@ -183,14 +255,14 @@ setup_mocks_monitor_no_change() {
 # run_script_with_real_sleep runs the script with mocked git/gh but real sleep,
 # so SECONDS-based timeout tests work correctly.
 run_script_with_real_sleep() {
-  export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  export -f git gh sleep _mock_counter_next _mock_call_should_timeout
+  export _MOCK_INITIAL _MOCK_CHANGED _MOCK_TIMEOUT_CALLS HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
   timeout 15 bash "$script" "$@" </dev/null
 }
 
 run_script() {
-  export -f git gh sleep _mock_counter_next
-  export _MOCK_INITIAL _MOCK_CHANGED HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  export -f git gh sleep _mock_counter_next _mock_call_should_timeout
+  export _MOCK_INITIAL _MOCK_CHANGED _MOCK_TIMEOUT_CALLS HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
   timeout 15 bash "$script" "$@" </dev/null
 }
 
@@ -210,6 +282,9 @@ test_names+=(
   test_monitor_status_no_pr_exits_nonzero
   test_monitor_status_no_pr_stderr_message
   test_monitor_status_api_failure_exits_nonzero
+  test_monitor_status_check_api_timeout_continues
+  test_monitor_status_sha_api_timeout_continues
+  test_monitor_status_overall_timeout_after_api_timeout
   test_monitor_no_subcommand_exits_nonzero
   test_monitor_help_exits_zero
   test_monitor_status_help_exits_zero
@@ -218,6 +293,7 @@ test_names+=(
   test_monitor_status_missing_interval_value_exits_nonzero
   test_monitor_status_invalid_interval_exits_nonzero
   test_monitor_status_zero_interval_exits_nonzero
+  test_monitor_status_negative_interval_exits_nonzero
   test_usage_lists_monitor
   test_monitor_status_timeout_exits_two
   test_monitor_status_timeout_stderr_message
@@ -417,6 +493,58 @@ test_monitor_status_api_failure_exits_nonzero() {
   fi
 }
 
+test_monitor_status_check_api_timeout_continues() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  setup_mocks_monitor_api_timeout "$initial" "$changed" "4"
+  local output exit_code=0
+  output=$(run_script monitor status --pr 42 --interval 1 --timeout 5m 2>&1) || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ] \
+    && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
+    && echo "$output" | grep -qF "check: CI" \
+    && echo "$output" | grep -qF "to: completed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: check-runs timeout should warn, retry, and detect change (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_status_sha_api_timeout_continues() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
+  setup_mocks_monitor_api_timeout "$initial" "$changed" "3"
+  local output exit_code=0
+  output=$(run_script monitor status --pr 42 --interval 1 --timeout 5m 2>&1) || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 0 ] \
+    && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
+    && echo "$output" | grep -qF "check: CI" \
+    && echo "$output" | grep -qF "to: completed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: SHA timeout should warn, retry, and detect change (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_status_overall_timeout_after_api_timeout() {
+  local initial='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  setup_mocks_monitor_api_timeout_no_change "$initial" "4"
+  local output exit_code=0
+  output=$(run_script_with_real_sleep monitor status --pr 42 --interval 1 --timeout 2s 2>&1) || exit_code=$?
+  cleanup_mock_counter
+  if [ "$exit_code" -eq 2 ] \
+    && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
+    && echo "$output" | grep -qF "monitor timed out after 2s"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: overall timeout should still fire after API timeout (exit=$exit_code, output: $output)"
+  fi
+}
+
 # test_monitor_no_subcommand_exits_nonzero verifies that running monitor with no
 # sub-command exits 1 with a usage message.
 test_monitor_no_subcommand_exits_nonzero() {
@@ -450,19 +578,55 @@ test_monitor_status_missing_pr_value_exits_nonzero() {
 # test_monitor_status_missing_interval_value_exits_nonzero verifies that --interval
 # without a value exits 1 with a clear error message.
 test_monitor_status_missing_interval_value_exits_nonzero() {
-  assert_exit 1 "monitor status --interval without value exits 1" bash "$script" monitor status --interval
+  local output exit_code=0
+  setup_mocks
+  output=$(run_script monitor status --interval 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --interval"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval should exit 1 with missing value message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_invalid_interval_exits_nonzero verifies that --interval with
 # a non-numeric value exits 1.
 test_monitor_status_invalid_interval_exits_nonzero() {
-  assert_exit 1 "monitor status --interval abc exits 1" bash "$script" monitor status --interval abc
+  local output exit_code=0
+  setup_mocks
+  output=$(run_script monitor status --interval abc 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: abc"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval abc should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_monitor_status_zero_interval_exits_nonzero verifies that --interval 0 is
 # rejected (zero is not a positive integer).
 test_monitor_status_zero_interval_exits_nonzero() {
-  assert_exit 1 "monitor status --interval 0 exits 1" bash "$script" monitor status --interval 0
+  local output exit_code=0
+  setup_mocks
+  output=$(run_script monitor status --interval 0 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: 0"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval 0 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_status_negative_interval_exits_nonzero() {
+  local output exit_code=0
+  setup_mocks
+  output=$(run_script monitor status --interval -1 2>&1) || exit_code=$?
+  if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: -1"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor status --interval -1 should exit 1 with invalid interval message (exit=$exit_code, output: $output)"
+  fi
 }
 
 # test_usage_lists_monitor verifies that the main --help output includes the monitor

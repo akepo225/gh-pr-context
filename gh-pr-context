@@ -8,6 +8,15 @@ die() {
   exit 1
 }
 
+# require_bash_version enforces Bash 5.1+, exiting via die on older shells.
+require_bash_version() {
+  if [ "${BASH_VERSINFO[0]}" -lt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -lt 1 ]; }; then
+    die "bash 5.1+ is required"
+  fi
+}
+
+require_bash_version
+
 # Parse a duration string (<number><s|m|h>) and output seconds.
 # Exits 1 on invalid input (empty, bare number, negative, non-numeric).
 parse_duration() {
@@ -97,11 +106,12 @@ usage() {
 }
 
 usage_monitor() {
-  echo "usage: gh-pr-context monitor <sub-command> [options]"
+  echo "usage: gh-pr-context monitor <sub-command|--all> [options]"
   echo ""
   echo "sub-commands:"
   echo "  status    Monitor CI check state changes"
   echo "  comments  Monitor new comments on the PR"
+  echo "  --all     Monitor CI check and comment changes"
   echo ""
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
@@ -119,12 +129,21 @@ usage_monitor_status() {
   echo "  --interval <sec>     Poll interval in seconds (default: 30)"
   echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
-  echo "  --check <name>       Watch only the named check (case-sensitive)"
   echo "  -h, --help           Show this message"
 }
 
 usage_monitor_comments() {
   echo "usage: gh-pr-context monitor comments [options]"
+  echo ""
+  echo "options:"
+  echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
+  echo "  --interval <sec>     Poll interval in seconds (default: 30)"
+  echo "  --timeout <dur>      Maximum time to poll (e.g. 30s, 5m, 1h)"
+  echo "  -h, --help           Show this message"
+}
+
+usage_monitor_all() {
+  echo "usage: gh-pr-context monitor --all [options]"
   echo ""
   echo "options:"
   echo "  --pr <number>        PR number (auto-detected from branch if omitted)"
@@ -141,26 +160,38 @@ resolve_owner_repo() {
   echo "$owner_repo"
 }
 
+# resolve_pr_number prints the open PR number for the current branch. The
+# optional timeout argument is passed through to _timed_gh_api.
 resolve_pr_number() {
+  local timeout_secs="${1:-}"
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD) || die "failed to determine current branch"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
   local owner=${owner_repo%%/*}
   local repo=${owner_repo#*/}
-  local pr_data
-  pr_data=$(gh api "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r') || die "failed to look up PR for branch '$branch'"
+  local pr_data rc
+  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
+    :
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then return 124; fi
+    die "failed to look up PR for branch '$branch'"
+  fi
   if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
     die "no open PR found for branch '$branch'"
   fi
   echo "$pr_data"
 }
 
+# resolve_pr_head_sha prints the remote PR head SHA. The optional timeout
+# argument is passed through to _timed_gh_api, so callers can observe exit 124.
 resolve_pr_head_sha() {
   local pr_number=$1
+  local timeout_secs="${2:-}"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  gh api "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
+  _timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
 validate_since_format() {
@@ -430,30 +461,157 @@ cmd_logs() {
   done <<< "$failed_pairs"
 }
 
+# _timed_gh_api runs gh api with an optional seconds deadline. It returns 124
+# when the deadline expires, matching the conventional timeout exit code.
+_timed_gh_api() {
+  local timeout_secs="${1:-}"
+  shift
+
+  if [ -z "$timeout_secs" ]; then
+    gh api "$@"
+    return
+  fi
+  if [ "$timeout_secs" -le 0 ]; then
+    return 124
+  fi
+
+  local stdout_file stderr_file
+  stdout_file=$(mktemp) || return 1
+  stderr_file=$(mktemp) || { rm -f "$stdout_file"; return 1; }
+
+  gh api "$@" >"$stdout_file" 2>"$stderr_file" &
+  local api_pid=$!
+  command sleep "$timeout_secs" &
+  local timer_pid=$!
+
+  local rc=0 completed_pid=""
+  wait -n -p completed_pid "$api_pid" "$timer_pid" || rc=$?
+  if [ "$completed_pid" = "$timer_pid" ]; then
+    kill "$api_pid" 2>/dev/null || true
+    wait "$api_pid" 2>/dev/null || true
+    rc=124
+  else
+    kill "$timer_pid" 2>/dev/null || true
+    wait "$timer_pid" 2>/dev/null || true
+  fi
+
+  if [ "$rc" -ne 124 ]; then
+    cat "$stdout_file"
+    cat "$stderr_file" >&2
+  fi
+
+  rm -f "$stdout_file" "$stderr_file"
+  return "$rc"
+}
+
+# monitor_call_timeout converts the remaining overall monitor budget into a
+# per-call deadline, returning 2 after printing the timeout message if exhausted.
+monitor_call_timeout() {
+  local timeout_secs="${1:-}" timeout_input="${2:-}"
+  if [ -z "$timeout_secs" ]; then
+    echo ""
+    return 0
+  fi
+
+  local remaining=$((timeout_secs - SECONDS))
+  if [ "$remaining" -le 0 ]; then
+    echo "monitor timed out after $timeout_input" >&2
+    return 2
+  fi
+  echo "$remaining"
+}
+
+# remaining_timeout_since returns the unspent seconds from a timeout that
+# started at start_seconds, or an empty value when no timeout is active.
+remaining_timeout_since() {
+  local timeout_secs="${1:-}" start_seconds=$2
+  if [ -z "$timeout_secs" ]; then
+    echo ""
+    return 0
+  fi
+
+  local remaining=$((timeout_secs - (SECONDS - start_seconds)))
+  if [ "$remaining" -lt 0 ]; then
+    remaining=0
+  fi
+  echo "$remaining"
+}
+
+# monitor_api_timeout_warning emits the retry notice for per-call gh api timeouts.
+monitor_api_timeout_warning() {
+  echo "gh api call timed out; retrying next poll" >&2
+}
+
 # capture_check_snapshot fetches check-runs for a given SHA via the GitHub API
 # and returns a normalized JSON array of {name, status, conclusion} objects
 # sorted by check name, suitable for diffing between poll cycles.
 capture_check_snapshot() {
-  local owner_repo=$1 sha=$2
+  local owner_repo=$1 sha=$2 timeout_secs="${3:-}"
   local checks_json
-  checks_json=$(gh api "repos/$owner_repo/commits/$sha/check-runs" --paginate) \
-    || die "failed to fetch check runs for SHA $sha"
+  if checks_json=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/commits/$sha/check-runs" --paginate); then
+    :
+  else
+    return $?
+  fi
   echo "$checks_json" | jq -s 'map(.check_runs) | add // [] | sort_by(.name) | map({name: .name, status: .status, conclusion: .conclusion})'
+}
+
+# compute_status_diff returns a JSON array of check status/conclusion changes
+# between two normalized check snapshots, including absent/new checks.
+compute_status_diff() {
+  local prev_status_snapshot=$1 cur_status_snapshot=$2
+  printf '%s\n%s\n' "$prev_status_snapshot" "$cur_status_snapshot" | jq -s '
+    . as $snapshots |
+    ($snapshots[0]) as $old |
+    ($snapshots[1]) as $new |
+    (($old | map(.name)) + ($new | map(.name))) | unique | sort |
+    map(
+      . as $name |
+      ($old | map(select(.name == $name)) | first) as $o |
+      ($new | map(select(.name == $name)) | first) as $n |
+      if $o == null then
+        {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
+      elif $n == null then
+        {check: $name, from: $o.status, to: "absent", conclusion: null}
+      elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
+        {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
+      else
+        empty
+      end
+    )
+  '
 }
 
 # capture_comment_id_snapshot fetches top-level review comment IDs (excluding
 # replies) and issue comment IDs for a given PR, returning a sorted newline-
 # separated list suitable for set-difference comparison between poll cycles.
 capture_comment_id_snapshot() {
-  local owner_repo=$1 pr_number=$2
+  local owner_repo=$1 pr_number=$2 timeout_secs="${3:-}"
+  local review_raw issue_raw review_rc issue_rc
+  local started_at=$SECONDS call_timeout
+  call_timeout=$(remaining_timeout_since "$timeout_secs" "$started_at")
+  if review_raw=$(_timed_gh_api "$call_timeout" "repos/$owner_repo/pulls/$pr_number/comments" --paginate); then
+    :
+  else
+    review_rc=$?
+    if [ "$review_rc" -eq 124 ]; then return 124; fi
+    die "failed to fetch review comments for PR #$pr_number"
+  fi
+  call_timeout=$(remaining_timeout_since "$timeout_secs" "$started_at")
+  if issue_raw=$(_timed_gh_api "$call_timeout" "repos/$owner_repo/issues/$pr_number/comments" --paginate); then
+    :
+  else
+    issue_rc=$?
+    if [ "$issue_rc" -eq 124 ]; then return 124; fi
+    die "failed to fetch issue comments for PR #$pr_number"
+  fi
+
   local review_ids issue_ids
-  review_ids=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate \
-    | jq -r '[.[] | select(.in_reply_to_id == null) | .id] | sort[]' | tr -d '\r') \
+  review_ids=$(echo "$review_raw" | jq -r '[.[] | select(.in_reply_to_id == null) | .id] | sort[]' | tr -d '\r') \
     || die "failed to fetch review comments for PR #$pr_number"
-  issue_ids=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate \
-    | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
+  issue_ids=$(echo "$issue_raw" | jq -r '[.[] | .id] | sort[]' | tr -d '\r') \
     || die "failed to fetch issue comments for PR #$pr_number"
-  { echo "$review_ids"; echo "$issue_ids"; } | sort -n | grep -v '^$' || true
+  { echo "$review_ids"; echo "$issue_ids"; } | sort | grep -v '^$' || true
 }
 
 # cmd_monitor_status polls the GitHub check-runs API at a configurable interval,
@@ -507,7 +665,8 @@ cmd_monitor_status() {
     || die "failed to resolve head SHA for PR #$pr_number"
 
   local prev_snapshot
-  prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha")
+  prev_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha") \
+    || die "failed to fetch check runs for SHA $prev_sha"
   if [ -n "$check_filter" ]; then
     prev_snapshot=$(echo "$prev_snapshot" | jq --arg name "$check_filter" 'map(select(.name == $name))')
   fi
@@ -539,7 +698,20 @@ cmd_monitor_status() {
     fi
 
     local cur_sha
-    if ! cur_sha=$(resolve_pr_head_sha "$pr_number" 2>&1); then
+    local call_timeout
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    local api_rc=0
+    if cur_sha=$(resolve_pr_head_sha "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
       die "failed to re-resolve head SHA for PR #$pr_number"
     fi
 
@@ -552,7 +724,18 @@ cmd_monitor_status() {
     fi
 
     local cur_snapshot
-    if ! cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" 2>&1); then
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
       die "failed to fetch check runs during poll"
     fi
     if [ -n "$check_filter" ]; then
@@ -560,26 +743,7 @@ cmd_monitor_status() {
     fi
 
     local changes
-    changes=$(printf '%s\n%s\n' "$prev_snapshot" "$cur_snapshot" | jq -s '
-      . as $snapshots |
-      ($snapshots[0]) as $old |
-      ($snapshots[1]) as $new |
-      (($old | map(.name)) + ($new | map(.name))) | unique | sort |
-      map(
-        . as $name |
-        ($old | map(select(.name == $name)) | first) as $o |
-        ($new | map(select(.name == $name)) | first) as $n |
-        if $o == null then
-          {check: $name, from: "absent", to: $n.status, conclusion: $n.conclusion}
-        elif $n == null then
-          {check: $name, from: $o.status, to: "absent", conclusion: null}
-        elif ($o.status != $n.status) or (($o.conclusion // "") != ($n.conclusion // "")) then
-          {check: $name, from: $o.status, to: $n.status, conclusion: $n.conclusion}
-        else
-          empty
-        end
-      )
-    ')
+    changes=$(compute_status_diff "$prev_snapshot" "$cur_snapshot")
 
     local change_count
     change_count=$(echo "$changes" | jq 'length' | tr -d '\r')
@@ -630,7 +794,7 @@ cmd_monitor_comments() {
         timeout_secs=$(parse_duration "$timeout_input")
         ;;
       --check)
-        die "--check is not supported for monitor comments"
+        die "unknown option: --check (only valid with monitor status)"
         ;;
       -h|--help) usage_monitor_comments; exit 0 ;;
       *) die "unknown option: $1" ;;
@@ -695,9 +859,228 @@ cmd_monitor_comments() {
   done
 }
 
+# cmd_monitor_all polls check status and comments in the same loop. It prints
+# all detected status changes before a new-comment summary and uses the same
+# exit codes as other monitor commands: 0 change, 1 error, 2 timeout, 130 signal.
+cmd_monitor_all() {
+  local pr_number="" interval=30 timeout_input="" timeout_secs=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr_number="$2"; shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"; shift 2
+        if ! echo "$interval" | grep -qE '^[1-9][0-9]*$'; then
+          die "invalid --interval value: $interval (expected a positive integer)"
+        fi
+        ;;
+      --timeout)
+        [ $# -ge 2 ] || die "missing value for --timeout"
+        timeout_input="$2"; shift 2
+        timeout_secs=$(parse_duration "$timeout_input")
+        ;;
+      --check)
+        die "unknown option: --check (only valid with monitor status)"
+        ;;
+      -h|--help) usage_monitor_all; exit 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  check_deps
+
+  local _monitor_interrupted=0
+  trap '_monitor_interrupted=1' INT TERM
+
+  SECONDS=0
+
+  local call_timeout api_rc=0
+  if [ -z "$pr_number" ]; then
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if pr_number=$(resolve_pr_number "$call_timeout"); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        echo "monitor timed out after $timeout_input" >&2
+        exit 2
+      fi
+      exit "$api_rc"
+    fi
+  fi
+
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+
+  local prev_sha
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if prev_sha=$(resolve_pr_head_sha "$pr_number" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to resolve head SHA for PR #$pr_number"
+  fi
+
+  local prev_status_snapshot
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if prev_status_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to fetch check runs for SHA $prev_sha"
+  fi
+
+  local initial_comment_snapshot
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if initial_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to fetch comments for PR #$pr_number"
+  fi
+  while true; do
+    if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
+    local sleep_for="$interval"
+    if [ -n "$timeout_secs" ]; then
+      local remaining=$((timeout_secs - SECONDS))
+      if [ "$remaining" -lt "$sleep_for" ]; then
+        sleep_for="$remaining"
+      fi
+    fi
+    sleep "$sleep_for" || true
+
+    if [ "$_monitor_interrupted" -eq 1 ]; then
+      :
+    elif [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+
+    local cur_sha call_timeout api_rc=0
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_sha=$(resolve_pr_head_sha "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
+      die "failed to re-resolve head SHA for PR #$pr_number"
+    fi
+
+    if [ "$cur_sha" != "$prev_sha" ]; then
+      echo "--- change"
+      echo "type: new-commit"
+      echo "sha: $cur_sha"
+      if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+      exit 0
+    fi
+
+    local cur_status_snapshot
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_status_snapshot=$(capture_check_snapshot "$owner_repo" "$cur_sha" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
+      die "failed to fetch check runs during poll"
+    fi
+
+    local cur_comment_snapshot
+    if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+      exit 2
+    fi
+    if cur_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+      :
+    else
+      api_rc=$?
+      if [ "$api_rc" -eq 124 ]; then
+        monitor_api_timeout_warning
+        if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+        continue
+      fi
+      die "failed to fetch comments during poll"
+    fi
+
+    local status_changes
+    status_changes=$(compute_status_diff "$prev_status_snapshot" "$cur_status_snapshot")
+
+    local status_change_count
+    status_change_count=$(echo "$status_changes" | jq 'length' | tr -d '\r')
+
+    local new_comment_ids new_comment_count
+    new_comment_ids=$(comm -23 <(echo "$cur_comment_snapshot") <(echo "$initial_comment_snapshot"))
+    new_comment_count=$(echo "$new_comment_ids" | grep -c '.' || true)
+
+    if [ "$status_change_count" -gt 0 ]; then
+      echo "$status_changes" | jq -r '.[] |
+        "--- change\n" +
+        "type: status\n" +
+        "check: \(.check)\n" +
+        "from: \(.from)\n" +
+        "to: \(.to)" +
+        if (.conclusion != null and .to != "absent") then "\nconclusion: \(.conclusion)" else "" end'
+    fi
+
+    if [ "$new_comment_count" -gt 0 ]; then
+      echo "--- change"
+      echo "type: new-comment"
+      echo "count: $new_comment_count"
+    fi
+
+    if [ "$status_change_count" -gt 0 ] || [ "$new_comment_count" -gt 0 ]; then
+      if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+      exit 0
+    fi
+
+    if [ "$_monitor_interrupted" -eq 1 ]; then exit 130; fi
+
+    prev_sha="$cur_sha"
+    prev_status_snapshot="$cur_status_snapshot"
+  done
+}
+
 # cmd_monitor is the top-level dispatcher for the monitor command, routing
-# sub-commands (status, comments) to their handlers. Exits 1 with usage when no
-# sub-command is provided.
+# sub-commands (status, comments, --all) to their handlers. Exits 1 with usage
+# when no sub-command is provided.
 cmd_monitor() {
   if [ $# -eq 0 ]; then
     die "missing monitor sub-command (see 'gh-pr-context monitor --help')"
@@ -709,6 +1092,7 @@ cmd_monitor() {
   case "$sub_command" in
     status) cmd_monitor_status "$@" ;;
     comments) cmd_monitor_comments "$@" ;;
+    --all) cmd_monitor_all "$@" ;;
     -h|--help) usage_monitor; exit 0 ;;
     *) die "unknown monitor sub-command: $sub_command" ;;
   esac
