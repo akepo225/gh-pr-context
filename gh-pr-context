@@ -513,6 +513,22 @@ monitor_call_timeout() {
   echo "$remaining"
 }
 
+# remaining_timeout_since returns the unspent seconds from a timeout that
+# started at start_seconds, or an empty value when no timeout is active.
+remaining_timeout_since() {
+  local timeout_secs="${1:-}" start_seconds=$2
+  if [ -z "$timeout_secs" ]; then
+    echo ""
+    return 0
+  fi
+
+  local remaining=$((timeout_secs - (SECONDS - start_seconds)))
+  if [ "$remaining" -lt 0 ]; then
+    remaining=0
+  fi
+  echo "$remaining"
+}
+
 # monitor_api_timeout_warning emits the retry notice for per-call gh api timeouts.
 monitor_api_timeout_warning() {
   echo "gh api call timed out; retrying next poll" >&2
@@ -564,14 +580,17 @@ compute_status_diff() {
 capture_comment_id_snapshot() {
   local owner_repo=$1 pr_number=$2 timeout_secs="${3:-}"
   local review_raw issue_raw review_rc issue_rc
-  if review_raw=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number/comments" --paginate); then
+  local started_at=$SECONDS call_timeout
+  call_timeout=$(remaining_timeout_since "$timeout_secs" "$started_at")
+  if review_raw=$(_timed_gh_api "$call_timeout" "repos/$owner_repo/pulls/$pr_number/comments" --paginate); then
     :
   else
     review_rc=$?
     if [ "$review_rc" -eq 124 ]; then return 124; fi
     die "failed to fetch review comments for PR #$pr_number"
   fi
-  if issue_raw=$(_timed_gh_api "$timeout_secs" "repos/$owner_repo/issues/$pr_number/comments" --paginate); then
+  call_timeout=$(remaining_timeout_since "$timeout_secs" "$started_at")
+  if issue_raw=$(_timed_gh_api "$call_timeout" "repos/$owner_repo/issues/$pr_number/comments" --paginate); then
     :
   else
     issue_rc=$?
@@ -873,21 +892,56 @@ cmd_monitor_all() {
   local owner_repo
   owner_repo=$(resolve_owner_repo)
 
-  local prev_sha
-  prev_sha=$(resolve_pr_head_sha "$pr_number") \
-    || die "failed to resolve head SHA for PR #$pr_number"
-
-  local prev_status_snapshot
-  prev_status_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha") \
-    || die "failed to fetch check runs for SHA $prev_sha"
-
-  local initial_comment_snapshot
-  initial_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number")
-
   local _monitor_interrupted=0
   trap '_monitor_interrupted=1' INT TERM
 
   SECONDS=0
+
+  local call_timeout api_rc=0
+  local prev_sha
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if prev_sha=$(resolve_pr_head_sha "$pr_number" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to resolve head SHA for PR #$pr_number"
+  fi
+
+  local prev_status_snapshot
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if prev_status_snapshot=$(capture_check_snapshot "$owner_repo" "$prev_sha" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to fetch check runs for SHA $prev_sha"
+  fi
+
+  local initial_comment_snapshot
+  if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then
+    exit 2
+  fi
+  if initial_comment_snapshot=$(capture_comment_id_snapshot "$owner_repo" "$pr_number" "$call_timeout" 2>/dev/null); then
+    :
+  else
+    api_rc=$?
+    if [ "$api_rc" -eq 124 ]; then
+      echo "monitor timed out after $timeout_input" >&2
+      exit 2
+    fi
+    die "failed to fetch comments for PR #$pr_number"
+  fi
   while true; do
     if [ -n "$timeout_secs" ] && [ "$SECONDS" -ge "$timeout_secs" ]; then
       echo "monitor timed out after $timeout_input" >&2

@@ -33,10 +33,11 @@ setup_mocks() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
+    echo "gh: unexpected call: $*" >&2
     exit 1
   }
   sleep() {
@@ -91,7 +92,7 @@ setup_mocks_monitor_all() {
           echo "$_MOCK_CHANGED_ISSUES"
         fi
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -119,7 +120,7 @@ setup_mocks_monitor_all_new_commit() {
       *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -138,7 +139,7 @@ setup_mocks_monitor_all_no_change() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -147,7 +148,7 @@ setup_mocks_monitor_all_no_change() {
       *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -175,7 +176,7 @@ setup_mocks_monitor_all_api_failure() {
         ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -221,7 +222,7 @@ setup_mocks_monitor_all_comment_api_timeout() {
           echo "$_MOCK_CHANGED_ISSUES"
         fi
         ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -256,7 +257,7 @@ setup_mocks_monitor_all_sha_api_timeout() {
         ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -286,7 +287,7 @@ setup_mocks_monitor_all_check_api_timeout() {
         ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -305,7 +306,7 @@ setup_mocks_monitor_all_api_timeout_no_change() {
       "rev-parse --git-dir") echo ".git" ;;
       "remote get-url origin") echo "https://github.com/acme/widgets.git" ;;
       "rev-parse --abbrev-ref HEAD") echo "feature-branch" ;;
-      *) exit 1 ;;
+      *) echo "git: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
   gh() {
@@ -321,7 +322,22 @@ setup_mocks_monitor_all_api_timeout_no_change() {
         ;;
       *"pulls/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_REVIEWS" ;;
       *"issues/42/comments"*"--paginate"*) echo "$_MOCK_INITIAL_ISSUES" ;;
-      *) exit 1 ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
+    esac
+  }
+}
+
+setup_mocks_monitor_all_bootstrap_comment_api_timeout() {
+  _MOCK_INITIAL_CHECKS="$1"
+  setup_counter_files
+  setup_mocks
+  gh() {
+    case "$*" in
+      *"pulls/42"*"--paginate"*"--jq"*) echo "$HEAD_SHA" ;;
+      *"check-runs"*"--paginate"*) echo "$_MOCK_INITIAL_CHECKS" ;;
+      *"pulls/42/comments"*"--paginate"*) exit 124 ;;
+      *"issues/42/comments"*"--paginate"*) echo "[]" ;;
+      *) echo "gh: unexpected call: $*" >&2; exit 1 ;;
     esac
   }
 }
@@ -368,6 +384,7 @@ test_names+=(
   test_monitor_all_check_api_timeout_continues
   test_monitor_all_comment_api_timeout_continues
   test_monitor_all_overall_timeout_after_api_timeout
+  test_monitor_all_bootstrap_timeout_exits_two
   test_monitor_all_help_exits_zero
   test_monitor_help_lists_all
 )
@@ -713,6 +730,20 @@ test_monitor_all_overall_timeout_after_api_timeout() {
   else
     fail=$((fail + 1))
     echo "FAIL: monitor --all overall timeout should still fire after API timeout (exit=$exit_code, output: $output)"
+  fi
+}
+
+test_monitor_all_bootstrap_timeout_exits_two() {
+  local checks='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+  setup_mocks_monitor_all_bootstrap_comment_api_timeout "$checks"
+  local output exit_code=0
+  output=$(run_script monitor --all --pr 42 --interval 1 --timeout 5m 2>&1) || exit_code=$?
+  cleanup_mock_counters
+  if [ "$exit_code" -eq 2 ] && echo "$output" | grep -qF "monitor timed out after 5m"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: monitor --all bootstrap timeout should exit 2 (exit=$exit_code, output: $output)"
   fi
 }
 

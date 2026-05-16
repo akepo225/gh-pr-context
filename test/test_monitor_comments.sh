@@ -19,6 +19,9 @@ setup_mocks() {
       *) exit 1 ;;
     esac
   }
+  gh() {
+    exit 1
+  }
   sleep() {
     :
   }
@@ -329,7 +332,8 @@ test_monitor_comments_output_format() {
 
 test_monitor_comments_check_flag_rejected() {
   local output exit_code=0
-  output=$(bash "$script" monitor comments --check ci.yml 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor comments --check ci.yml 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF -- "unknown option: --check (only valid with monitor status)"; then
     pass=$((pass + 1))
   else
@@ -440,17 +444,21 @@ test_monitor_comments_api_failure_exits_nonzero() {
 }
 
 test_monitor_comments_help_exits_zero() {
-  assert_exit 0 "monitor comments --help exits 0" bash "$script" monitor comments --help
-  assert_exit 0 "monitor comments -h exits 0" bash "$script" monitor comments -h
+  setup_mocks
+  assert_exit 0 "monitor comments --help exits 0" run_script monitor comments --help
+  setup_mocks
+  assert_exit 0 "monitor comments -h exits 0" run_script monitor comments -h
 }
 
 test_monitor_comments_missing_pr_value_exits_nonzero() {
-  assert_exit 1 "monitor comments --pr without value exits 1" bash "$script" monitor comments --pr
+  setup_mocks
+  assert_exit 1 "monitor comments --pr without value exits 1" run_script monitor comments --pr
 }
 
 test_monitor_comments_missing_interval_value_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor comments --interval 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor comments --interval 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "missing value for --interval"; then
     pass=$((pass + 1))
   else
@@ -461,7 +469,8 @@ test_monitor_comments_missing_interval_value_exits_nonzero() {
 
 test_monitor_comments_invalid_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor comments --interval abc 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor comments --interval abc 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: abc"; then
     pass=$((pass + 1))
   else
@@ -472,7 +481,8 @@ test_monitor_comments_invalid_interval_exits_nonzero() {
 
 test_monitor_comments_zero_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor comments --interval 0 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor comments --interval 0 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: 0"; then
     pass=$((pass + 1))
   else
@@ -483,7 +493,8 @@ test_monitor_comments_zero_interval_exits_nonzero() {
 
 test_monitor_comments_negative_interval_exits_nonzero() {
   local output exit_code=0
-  output=$(bash "$script" monitor comments --interval -1 2>&1) || exit_code=$?
+  setup_mocks
+  output=$(run_script monitor comments --interval -1 2>&1) || exit_code=$?
   if [ "$exit_code" -eq 1 ] && echo "$output" | grep -qF "invalid --interval value: -1"; then
     pass=$((pass + 1))
   else
@@ -493,9 +504,11 @@ test_monitor_comments_negative_interval_exits_nonzero() {
 }
 
 test_monitor_comments_missing_timeout_value_exits_nonzero() {
-  assert_exit 1 "monitor comments --timeout without value exits 1" bash "$script" monitor comments --timeout
+  setup_mocks
+  assert_exit 1 "monitor comments --timeout without value exits 1" run_script monitor comments --timeout
 }
 
 test_monitor_comments_invalid_timeout_exits_nonzero() {
-  assert_exit 1 "monitor comments --timeout invalid exits 1" bash "$script" monitor comments --timeout abc
+  setup_mocks
+  assert_exit 1 "monitor comments --timeout invalid exits 1" run_script monitor comments --timeout abc
 }
