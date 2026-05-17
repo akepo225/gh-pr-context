@@ -76,6 +76,16 @@ GHSCRIPT
   chmod +x "$_MOCK_DIR/gh"
 }
 
+# Convert a path for use in mock scripts. On Windows, uses mock_path;
+# on Linux, returns the path unchanged.
+mock_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    echo "$1"
+  fi
+}
+
 run_python() {
   if command -v cygpath >/dev/null 2>&1; then
     local git_bash='"C:/Program Files/Git/usr/bin/bash.exe"'
@@ -139,7 +149,7 @@ test_py_logs_multiple_failures() {
   echo "build error at line 5" > "$_MOCK_DIR/log_111.txt"
   echo "test assertion failed" > "$_MOCK_DIR/log_222.txt"
   local win_mock_dir
-  win_mock_dir=$(cygpath -m "$_MOCK_DIR")
+  win_mock_dir=$(mock_path "$_MOCK_DIR")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
@@ -166,7 +176,7 @@ test_py_logs_truncation_at_500_lines() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   seq 1 600 > "$_MOCK_DIR/log_111.txt"
   local win_log_file
-  win_log_file=$(cygpath -m "$_MOCK_DIR/log_111.txt")
+  win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
@@ -190,7 +200,7 @@ test_py_logs_truncation_notice_format() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   seq 1 600 > "$_MOCK_DIR/log_111.txt"
   local win_log_file
-  win_log_file=$(cygpath -m "$_MOCK_DIR/log_111.txt")
+  win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
@@ -212,7 +222,7 @@ test_py_logs_under_500_no_truncation() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   seq 1 10 > "$_MOCK_DIR/log_111.txt"
   local win_log_file
-  win_log_file=$(cygpath -m "$_MOCK_DIR/log_111.txt")
+  win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
@@ -269,7 +279,7 @@ test_py_logs_exits_zero() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   echo "error in CI" > "$_MOCK_DIR/log_111.txt"
   local win_log_file
-  win_log_file=$(cygpath -m "$_MOCK_DIR/log_111.txt")
+  win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
