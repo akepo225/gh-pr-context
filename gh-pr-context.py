@@ -89,10 +89,12 @@ def gh_api_jq(endpoint, jq_filter):
 
 def check_deps():
     from shutil import which
-    for cmd in ("gh", "git"):
-        if not which(cmd):
-            die(f"{cmd} is required but not found on PATH")
-    out, rc = run_cmd(["git", "rev-parse", "--git-dir"])
+    git_bin = _git_cmd()[0]
+    gh_bin = _gh_cmd()[0]
+    for label, binary in (("git", git_bin), ("gh", gh_bin)):
+        if not which(binary):
+            die(f"{label} is required but not found on PATH")
+    out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
     if rc != 0:
         die("not a git repository")
 
@@ -151,7 +153,7 @@ def resolve_since_timestamp(since_input):
     if not since_input:
         return ""
     if since_input == "last-commit":
-        out, rc = run_cmd(["git", "log", "-1", "--format=%ct", "HEAD"])
+        out, rc = run_cmd(_git_cmd() + ["log", "-1", "--format=%ct", "HEAD"])
         if rc != 0:
             die("failed to resolve last-commit timestamp")
         epoch = int(out.strip())
@@ -163,7 +165,7 @@ def resolve_since_timestamp(since_input):
         if exp_rc == 0:
             expanded = exp_out.strip()
         if expanded:
-            epoch_out, log_rc = run_cmd(["git", "log", "-1", "--format=%ct", expanded])
+            epoch_out, log_rc = run_cmd(_git_cmd() + ["log", "-1", "--format=%ct", expanded])
             if log_rc == 0:
                 epoch = int(epoch_out.strip())
                 dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
@@ -441,7 +443,7 @@ def cmd_comments(argv):
     merged.sort(key=lambda x: x["created"])
 
     if since_ref:
-        merged = [c for c in merged if c["created"] >= since_ref]
+        merged = [c for c in merged if c["created"] >= since_ref or c.get("replies")]
 
     lines = []
     for item in merged:
@@ -481,7 +483,6 @@ def usage():
     print("  comments   Fetch PR comments")
     print("  status     Fetch CI check status")
     print("  logs       Fetch logs for failed CI checks")
-    print("  monitor    Poll for changes to CI status or comments")
     print("")
     print("options:")
     print("  --pr <number>   PR number (auto-detected from branch if omitted)")
