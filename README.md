@@ -4,11 +4,26 @@ Token-efficient PR context CLI for LLM coding assistants. Wraps `gh api` to fetc
 
 ## Requirements
 
+All runtimes require:
+
 - [gh](https://cli.github.com/) (authenticated)
+- [git](https://git-scm.com/)
+
+Unix-like Bash runtime:
+
 - [jq](https://jqlang.github.io/jq/)
 - bash 5.1+
 
+Native Windows runtime:
+
+- Python 3.11+ available as `py`, `python`, or `python3`
+- PowerShell for running `install.ps1`
+
+`jq` and Bash are not required for native Windows usage.
+
 ## Install
+
+### Unix-like Bash
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | bash
@@ -37,6 +52,37 @@ For example, to install `v0.2.2`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=v0.2.2 bash
 ```
+
+### Windows PowerShell
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+Install to a custom directory:
+
+```powershell
+.\install.ps1 -InstallDir C:\tools
+```
+
+Or use the `INSTALL_DIR` environment variable:
+
+```powershell
+$env:INSTALL_DIR = "C:\tools"
+.\install.ps1
+```
+
+Install a specific version:
+
+```powershell
+$env:GH_PR_CONTEXT_VERSION = "v0.2.5"
+.\install.ps1
+```
+
+The Windows installer downloads `gh-pr-context.py`, creates a `gh-pr-context.cmd` shim, and installs both to `$env:USERPROFILE\.local\bin` by default. If the install directory is not on PATH, it prints the PowerShell command needed to add it persistently.
+
+Note: native Windows support currently verifies the install path with `gh-pr-context --version`; only `--version` and `--help` are available until full `comments`, `status`, `logs`, and `monitor` command support lands in later Windows slices.
 
 ## Usage
 
