@@ -49,7 +49,7 @@ jobs:
 
       - name: Install gh-pr-context
         env:
-          GH_PR_CONTEXT_VERSION: ${{ github.head_ref || github.ref_name }}
+          GH_PR_CONTEXT_VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
           INSTALL_DIR: ${{ runner.temp }}\gh-pr-context-bin
         run: .\install.ps1
 
