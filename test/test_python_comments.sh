@@ -35,8 +35,7 @@ assert_stderr_contains() {
 }
 
 setup_mock_dir() {
-  # Use Windows TEMP so both Git Bash and Python subprocess can access it
-  _MOCK_DIR=$(TMPDIR="$TEMP" mktemp -d)
+  _MOCK_DIR=$(mktemp -d)
 }
 
 cleanup_mock_dir() {
