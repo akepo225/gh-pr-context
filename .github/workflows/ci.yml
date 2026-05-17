@@ -58,7 +58,7 @@ jobs:
 
       - name: Smoke test version command
         run: |
-          $expected = (Select-String -Path .\gh-pr-context -Pattern '^version=').Line -replace '^version="([^"]+)".*$', '$1'
+          $expected = (Select-String -Path .\gh-pr-context.py -Pattern '^VERSION\s*=').Line -replace '^VERSION\s*=\s*"([^"]+)".*$', '$1'
           $actual = gh-pr-context --version
           if ($actual -ne "gh-pr-context $expected") {
             Write-Error "Expected gh-pr-context $expected, got $actual"
