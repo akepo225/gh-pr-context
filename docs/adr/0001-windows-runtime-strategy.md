@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted - 2026-05-17.
 
 ## Context
 
@@ -10,7 +10,7 @@ Accepted.
 
 The project's output format is the product contract. Commands return terse plain text with stable delimiters, field ordering, sorting, nested review replies, flat issue comments, and one-line `error:` messages on failure. Any Windows-native runtime must preserve that behavior rather than introduce a new object or JSON output shape.
 
-The PRD originally scoped Windows-native support out and targeted Bash environments such as macOS, Linux, WSL, and Git Bash. Sprint 4 changes that direction: future slices need a native Windows strategy before implementation can begin. Existing project guidance already states that, if Bash becomes unwieldy, the fallback is a single Python file with no external dependencies and no Node.js.
+The [PRD](../../PRD.md) originally scoped Windows-native support out and targeted Bash environments such as macOS, Linux, WSL, and Git Bash. Issue #55 changes that direction: future slices need a native Windows strategy before implementation can begin. Existing project guidance already states that, if Bash becomes unwieldy, the fallback is a single Python file with no external dependencies and no Node.js.
 
 ## Decision Drivers
 
@@ -31,6 +31,10 @@ A native Windows entry point implemented as one Python file with no external Pyt
 
 A `.ps1` rewrite using PowerShell-native facilities such as `Invoke-RestMethod`, `ConvertFrom-Json`, and the object pipeline.
 
+### Compiled single-binary CLI
+
+A Go or Rust rewrite could avoid requiring Python on Windows, but it would introduce a build toolchain, release artifacts, and cross-compilation workflow that conflict with the current no-build-step project model. There is no existing Go or Rust codebase precedent in this repository.
+
 ## Decision
 
 Native Windows support will be implemented as a **single-file Python CLI with no external Python dependencies**.
@@ -39,7 +43,7 @@ For Windows-native usage:
 
 - `gh` remains required and must be authenticated.
 - `git` remains required for repository and branch context.
-- Python 3 is required and must be discoverable as `py`, `python`, or `python3` by the installer or wrapper.
+- Python 3.11 or later is required and must be discoverable as `py`, `python`, or `python3` by the installer or wrapper.
 - `jq` is not required; Python's standard library `json` module replaces it.
 - Bash is not required for the Windows-native entry point.
 - Node.js remains out of scope.
@@ -71,12 +75,13 @@ The Python port must not introduce JSON wrapping, decorative headers, PowerShell
 
 ## Install Path
 
-The Windows install path should be documented separately from the existing curl-to-Bash installer. It should install or expose a command named `gh-pr-context` that runs the Python entry point through an available Python launcher.
+The Windows install path should be documented separately from the existing curl-to-Bash installer. It should install or expose a command named `gh-pr-context` that runs the Python entry point through an available Python launcher. This work is tracked by #56.
 
 The installer or setup documentation should:
 
-- Detect `py`, `python`, or `python3`.
-- Fail with a clear one-line error if Python 3 is unavailable.
+- Prefer the Windows `py` launcher, then fall back to `python` or `python3`.
+- Fail with a clear one-line error if Python 3.11 or later is unavailable.
+- Detect and reject the Windows Store `python` app execution alias when it does not resolve to a real interpreter.
 - Require `gh` and `git` on `PATH`.
 - Avoid requiring `jq` or Bash for native Windows usage.
 - Keep version pinning behavior equivalent to the existing installer where practical.
@@ -100,7 +105,7 @@ The Python implementation should add behavior tests that use mocked `gh` and `gi
 - One-line stderr errors.
 - UTF-8 and LF output normalization.
 
-CI should add a `windows-latest` job for the Python entry point once the port exists. That job should not require network access for unit tests.
+CI should add a `windows-latest` job for the Python entry point once the port exists. That work is tracked by #60, and the job should not require network access for unit tests.
 
 ## Consequences
 
@@ -114,8 +119,8 @@ Positive consequences:
 
 Negative consequences:
 
-- Python is an additional Windows prerequisite and is not guaranteed on every vanilla Windows machine.
+- Python is an additional Windows prerequisite and is not guaranteed on every stock Windows machine.
 - Until a full Python port exists, Bash remains the only implemented runtime.
 - Maintaining Bash and Python in parallel still carries duplication risk unless a later decision makes Python the primary cross-platform implementation.
 
-This ADR supersedes the PRD's original statement that Windows-native support is out of scope for future Windows support work. It does not change the current Bash CLI behavior by itself.
+This ADR supersedes the [PRD](../../PRD.md)'s original statement that Windows-native support is out of scope for future Windows support work. It does not change the current Bash CLI behavior by itself.
