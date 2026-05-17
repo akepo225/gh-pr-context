@@ -41,7 +41,7 @@ assert_stderr_contains() {
 }
 
 setup_mock_dir() {
-  _MOCK_DIR=$(TMPDIR="$TEMP" mktemp -d)
+  _MOCK_DIR=$(mktemp -d)
 }
 
 cleanup_mock_dir() {
