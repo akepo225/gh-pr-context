@@ -38,6 +38,15 @@ For example, to install `v0.2.2`:
 curl -fsSL https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.sh | GH_PR_CONTEXT_VERSION=v0.2.2 bash
 ```
 
+Windows PowerShell install:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/akepo225/gh-pr-context/master/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+The Windows installer requires `gh`, `git`, and Python 3.11+ available as `py`, `python`, or `python3`. It installs the Python entry point and a `gh-pr-context.cmd` shim to `$env:USERPROFILE\.local\bin` by default, or to `$env:INSTALL_DIR` when set. Pin a version with `$env:GH_PR_CONTEXT_VERSION = "v0.2.5"` before running the installer.
+
 ## Usage
 
 All commands auto-detect the PR from the current branch. Pass `--pr <number>` to target a specific PR.
