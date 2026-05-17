@@ -10,20 +10,13 @@ def die(message):
 
 
 def usage():
-    print("usage: gh-pr-context <command> [options]")
-    print("")
-    print("commands:")
-    print("  comments   Fetch PR comments")
-    print("  status     Fetch CI check status")
-    print("  logs       Fetch logs for failed CI checks")
-    print("  monitor    Poll for changes to CI status or comments")
+    print("usage: gh-pr-context [--version|--help]")
     print("")
     print("options:")
-    print("  --pr <number>   PR number (auto-detected from branch if omitted)")
-    print("  --since <ref>   Filter comments by time")
-    print("  --all           Return all comments (default)")
     print("  --version       Show version")
     print("  -h, --help      Show this message")
+    print("")
+    print("note: Windows Python runtime currently supports --version and --help only")
 
 
 def main(argv):
@@ -42,7 +35,7 @@ def main(argv):
         usage()
         return 0
 
-    return die("Windows Python runtime currently supports --version only")
+    return die("Windows Python runtime currently supports --version and --help only")
 
 
 if __name__ == "__main__":

@@ -175,9 +175,14 @@ if (-not $installDirOnPath) {
     $env:Path = "$InstallDir;$env:Path"
 }
 
-$versionOutput = & $ScriptName --version 2>$null
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($versionOutput)) {
+$versionOutput = & $WrapperPath --version 2>$null
+if (
+    $LASTEXITCODE -ne 0 -or
+    [string]::IsNullOrWhiteSpace($versionOutput) -or
+    $versionOutput -notmatch "^$ScriptName\s+\S+"
+) {
     Die "failed to run $ScriptName --version"
 }
 
 Write-Output "verified $versionOutput"
+Write-Output "note: Windows Python runtime currently supports --version and --help only"

@@ -47,6 +47,8 @@ Invoke-WebRequest https://raw.githubusercontent.com/akepo225/gh-pr-context/maste
 
 The Windows installer requires `gh`, `git`, and Python 3.11+ available as `py`, `python`, or `python3`. It installs the Python entry point and a `gh-pr-context.cmd` shim to `$env:USERPROFILE\.local\bin` by default, or to `$env:INSTALL_DIR` when set. Pin a version with `$env:GH_PR_CONTEXT_VERSION = "v0.2.5"` before running the installer.
 
+Note: native Windows support currently verifies the install path with `gh-pr-context --version`; only `--version` and `--help` are available until full `comments`, `status`, `logs`, and `monitor` command support lands in later Windows slices.
+
 ## Usage
 
 All commands auto-detect the PR from the current branch. Pass `--pr <number>` to target a specific PR.
