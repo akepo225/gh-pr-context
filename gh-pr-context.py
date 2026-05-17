@@ -192,6 +192,146 @@ def resolve_since_timestamp(since_input):
     die(f"invalid --since value: {since_input} (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)")
 
 
+def resolve_pr_head_sha(pr_number):
+    owner_repo = resolve_owner_repo()
+    val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
+    if not ok or not val:
+        return None
+    return val
+
+
+def cmd_status(argv):
+    pr_number = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--pr":
+            if i + 1 >= len(argv):
+                die("missing value for --pr")
+            pr_number = argv[i + 1]
+            i += 2
+        elif arg in ("-h", "--help"):
+            usage()
+            sys.exit(0)
+        else:
+            die(f"unknown option: {arg}")
+
+    check_deps()
+
+    if not pr_number:
+        pr_number = resolve_pr_number()
+
+    owner_repo = resolve_owner_repo()
+
+    sha = resolve_pr_head_sha(pr_number)
+    if not sha:
+        die("failed to resolve head SHA for PR #{pr_number}")
+
+    checks_raw, ok = gh_api_paginated(f"repos/{owner_repo}/commits/{sha}/check-runs")
+    if not ok:
+        die(f"failed to fetch check runs for SHA {sha}")
+
+    checks_data = parse_paginated_json(checks_raw)
+
+    all_runs = []
+    for page in checks_data:
+        if isinstance(page, dict) and "check_runs" in page:
+            all_runs.extend(page["check_runs"])
+
+    all_runs.sort(key=lambda x: x.get("name", ""))
+
+    lines = []
+    for run in all_runs:
+        parts = [
+            "--- check",
+            f"name: {run['name']}",
+            f"status: {run['status']}",
+        ]
+        if run.get("status") == "completed":
+            parts.append(f"conclusion: {run['conclusion']}")
+        lines.append("\n".join(parts))
+
+    output = "\n".join(lines)
+    if output:
+        print(output)
+
+
+def cmd_logs(argv):
+    pr_number = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--pr":
+            if i + 1 >= len(argv):
+                die("missing value for --pr")
+            pr_number = argv[i + 1]
+            i += 2
+        elif arg in ("-h", "--help"):
+            usage()
+            sys.exit(0)
+        else:
+            die(f"unknown option: {arg}")
+
+    check_deps()
+
+    if not pr_number:
+        pr_number = resolve_pr_number()
+
+    owner_repo = resolve_owner_repo()
+
+    sha = resolve_pr_head_sha(pr_number)
+    if not sha:
+        die(f"failed to resolve head SHA for PR #{pr_number}")
+
+    checks_raw, ok = gh_api_paginated(f"repos/{owner_repo}/commits/{sha}/check-runs")
+    if not ok:
+        die(f"failed to fetch check runs for SHA {sha}")
+
+    checks_data = parse_paginated_json(checks_raw)
+
+    all_runs = []
+    for page in checks_data:
+        if isinstance(page, dict) and "check_runs" in page:
+            all_runs.extend(page["check_runs"])
+
+    failed = sorted(
+        [r for r in all_runs if r.get("status") == "completed" and r.get("conclusion") == "failure"],
+        key=lambda x: x.get("name", ""),
+    )
+
+    if not failed:
+        return
+
+    for run in failed:
+        job_id = run["id"]
+        name = run["name"]
+        log_content = ""
+        try:
+            args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
+            result = subprocess.run(args, capture_output=True, text=True)
+            if result.returncode == 0:
+                log_content = result.stdout
+        except Exception:
+            pass
+
+        print("--- log")
+        print(f"name: {name}")
+
+        if not log_content:
+            print("[log not available]")
+            continue
+
+        log_lines = log_content.splitlines()
+        if len(log_lines) > 500:
+            for line in log_lines[:500]:
+                print(line)
+            omitted = len(log_lines) - 500
+            print(f"[truncated: {omitted} lines omitted]")
+        else:
+            print(log_content, end="" if log_content.endswith("\n") else "\n")
+
+
+
 def cmd_comments(argv):
     pr_number = ""
     since_input = ""
@@ -371,8 +511,14 @@ def main(argv):
     if command == "comments":
         cmd_comments(rest)
         return 0
+    if command == "status":
+        cmd_status(rest)
+        return 0
+    if command == "logs":
+        cmd_logs(rest)
+        return 0
 
-    return die("Windows Python runtime currently supports --version and --help only")
+    return die(f"unknown command: {command}")
 
 
 if __name__ == "__main__":
