@@ -67,6 +67,7 @@ def parse_paginated_json(raw):
                 items.append(obj)
             pos = end
         except json.JSONDecodeError:
+            print("warning: incomplete paginated JSON response", file=sys.stderr)
             break
     return items
 
@@ -156,9 +157,12 @@ def resolve_since_timestamp(since_input):
         out, rc = run_cmd(_git_cmd() + ["log", "-1", "--format=%ct", "HEAD"])
         if rc != 0:
             die("failed to resolve last-commit timestamp")
-        epoch = int(out.strip())
-        dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            epoch = int(out.strip())
+            dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, OverflowError):
+            die("failed to resolve last-commit timestamp")
     if re.match(r"^[0-9a-fA-F]{7,40}$", since_input):
         expanded = ""
         exp_out, exp_rc = run_git_ok("rev-parse", since_input)
@@ -167,9 +171,12 @@ def resolve_since_timestamp(since_input):
         if expanded:
             epoch_out, log_rc = run_cmd(_git_cmd() + ["log", "-1", "--format=%ct", expanded])
             if log_rc == 0:
-                epoch = int(epoch_out.strip())
-                dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-                return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                try:
+                    epoch = int(epoch_out.strip())
+                    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+                    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                except (ValueError, OverflowError):
+                    pass
         sha_for_api = expanded or since_input
         owner_repo = resolve_owner_repo()
         api_date, ok = gh_api_jq(
@@ -211,6 +218,8 @@ def cmd_status(argv):
             if i + 1 >= len(argv):
                 die("missing value for --pr")
             pr_number = argv[i + 1]
+            if not pr_number:
+                die("--pr value must not be empty")
             i += 2
         elif arg in ("-h", "--help"):
             usage()
@@ -227,7 +236,7 @@ def cmd_status(argv):
 
     sha = resolve_pr_head_sha(pr_number)
     if not sha:
-        die("failed to resolve head SHA for PR #{pr_number}")
+        die(f"failed to resolve head SHA for PR #{pr_number}")
 
     checks_raw, ok = gh_api_paginated(f"repos/{owner_repo}/commits/{sha}/check-runs")
     if not ok:
@@ -267,6 +276,8 @@ def cmd_logs(argv):
             if i + 1 >= len(argv):
                 die("missing value for --pr")
             pr_number = argv[i + 1]
+            if not pr_number:
+                die("--pr value must not be empty")
             i += 2
         elif arg in ("-h", "--help"):
             usage()
@@ -345,6 +356,8 @@ def cmd_comments(argv):
             if i + 1 >= len(argv):
                 die("missing value for --pr")
             pr_number = argv[i + 1]
+            if not pr_number:
+                die("--pr value must not be empty")
             i += 2
         elif arg == "--since":
             if i + 1 >= len(argv):
@@ -400,6 +413,7 @@ def cmd_comments(argv):
         endpoint = f"repos/{owner_repo}/pulls/comments/{cid}/replies"
         replies_raw, ok = gh_api_paginated(endpoint)
         if not ok:
+            print(f"warning: failed to fetch replies for comment {cid}", file=sys.stderr)
             replies_raw = "[]"
         replies_data = parse_paginated_json(replies_raw)
 
