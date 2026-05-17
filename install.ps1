@@ -147,8 +147,10 @@ try {
     Die "failed to write to $PythonPath"
 }
 
-$pythonCommand = @($Python.Command) + @($Python.Arguments)
-$pythonInvocation = ($pythonCommand | ForEach-Object { Quote-CmdArgument $_ }) -join " "
+$pythonInvocation = Quote-CmdArgument $Python.Command
+if ($Python.Arguments.Count -gt 0) {
+    $pythonInvocation = "$pythonInvocation $($Python.Arguments -join ' ')"
+}
 $wrapper = @(
     "@echo off",
     "setlocal",

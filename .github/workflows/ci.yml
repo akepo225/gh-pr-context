@@ -38,6 +38,34 @@ jobs:
       - name: Tests
         run: bash test/run.sh
 
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gh-pr-context
+        env:
+          GH_PR_CONTEXT_VERSION: ${{ github.head_ref || github.ref_name }}
+          INSTALL_DIR: ${{ runner.temp }}\gh-pr-context-bin
+        run: .\install.ps1
+
+      - name: Add install directory to PATH
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ runner.temp }}\gh-pr-context-bin"
+
+      - name: Smoke test version command
+        run: |
+          $expected = (Select-String -Path .\gh-pr-context -Pattern '^version=').Line -replace '^version="([^"]+)".*$', '$1'
+          $actual = gh-pr-context --version
+          if ($actual -ne "gh-pr-context $expected") {
+            Write-Error "Expected gh-pr-context $expected, got $actual"
+            exit 1
+          }
+          Write-Output $actual
+
   version-check:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
