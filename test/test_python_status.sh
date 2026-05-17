@@ -5,7 +5,11 @@
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 python_script="$repo_root/gh-pr-context.py"
-python_cmd="py -3"
+if command -v py >/dev/null 2>&1; then
+  python_cmd="py -3"
+else
+  python_cmd="python3"
+fi
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
@@ -72,9 +76,14 @@ GHSCRIPT
 }
 
 run_python() {
-  local git_bash='"C:/Program Files/Git/usr/bin/bash.exe"'
-  local git_mock="$git_bash $(cygpath -m "$_MOCK_DIR/git")"
-  local gh_mock="$git_bash $(cygpath -m "$_MOCK_DIR/gh")"
+  if command -v cygpath >/dev/null 2>&1; then
+    local git_bash='"C:/Program Files/Git/usr/bin/bash.exe"'
+    local git_mock="$git_bash $(cygpath -m "$_MOCK_DIR/git")"
+    local gh_mock="$git_bash $(cygpath -m "$_MOCK_DIR/gh")"
+  else
+    local git_mock="bash $_MOCK_DIR/git"
+    local gh_mock="bash $_MOCK_DIR/gh"
+  fi
   GH_PR_CONTEXT_GIT="$git_mock" GH_PR_CONTEXT_GH="$gh_mock" \
     $python_cmd "$python_script" "$@"
 }
