@@ -20,7 +20,6 @@ _MOCK_DIR=""
 
 _summary_on_exit() {
   if [ "${fail:-0}" -gt 0 ]; then
-    echo "" >&2
     echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
   fi
 }
