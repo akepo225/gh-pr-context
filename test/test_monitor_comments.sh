@@ -21,6 +21,7 @@ _mock_call_should_timeout() {
 }
 
 setup_mocks() {
+  _RESOLVED_OWNER_REPO="acme/widgets"
   git() {
     case "$*" in
       "rev-parse --git-dir") echo ".git" ;;
@@ -85,6 +86,9 @@ setup_mocks_monitor_comments_auto_detect() {
   echo 0 > "$_MOCK_COUNTER_FILE"
   setup_mocks
   gh() {
+    case "$*" in
+      "api repos/acme/widgets --jq"*) echo 'false'; return ;;
+    esac
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
@@ -267,6 +271,7 @@ run_script() {
   export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
   export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE _MOCK_TIMEOUT_CALLS
+  export _RESOLVED_OWNER_REPO
   timeout 15 bash "$script" "$@" </dev/null
 }
 
@@ -274,6 +279,7 @@ run_script_with_real_sleep() {
   export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
   export _MOCK_REVIEWS _MOCK_ISSUES _MOCK_COUNTER_FILE _MOCK_TIMEOUT_CALLS
+  export _RESOLVED_OWNER_REPO
   timeout 15 bash "$script" "$@" </dev/null
 }
 

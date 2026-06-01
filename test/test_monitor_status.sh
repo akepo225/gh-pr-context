@@ -28,6 +28,7 @@ _mock_call_should_timeout() {
 # `git` responds with fixed repo URL and branch values for known invocations and exits
 # nonzero for others; `gh` defaults to fail closed; `sleep` is a no-op so polling tests complete instantly.
 setup_mocks() {
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_TIMEOUT_CALLS=""
   git() {
     case "$*" in
@@ -112,6 +113,9 @@ setup_mocks_monitor_auto_detect() {
   echo 0 > "$_MOCK_COUNTER_FILE"
   setup_mocks
   gh() {
+    case "$*" in
+      "api repos/acme/widgets --jq"*) echo 'false'; return ;;
+    esac
     local call_num
     call_num=$(_mock_counter_next)
     case "$*" in
@@ -257,12 +261,14 @@ setup_mocks_monitor_no_change() {
 run_script_with_real_sleep() {
   export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL _MOCK_CHANGED _MOCK_TIMEOUT_CALLS HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  export _RESOLVED_OWNER_REPO
   timeout 15 bash "$script" "$@" </dev/null
 }
 
 run_script() {
   export -f git gh sleep _mock_counter_next _mock_call_should_timeout
   export _MOCK_INITIAL _MOCK_CHANGED _MOCK_TIMEOUT_CALLS HEAD_SHA NEW_SHA _MOCK_COUNTER_FILE
+  export _RESOLVED_OWNER_REPO
   timeout 15 bash "$script" "$@" </dev/null
 }
 
