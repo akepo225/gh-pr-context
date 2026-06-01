@@ -112,7 +112,22 @@ def resolve_pr_number():
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
     owner, repo = owner_repo.split("/", 1)
-    endpoint = f"repos/{owner}/{repo}/pulls?head={owner}:{branch}"
+
+    # On forks, PRs live on the upstream (parent) repo. Detect fork and
+    # use parent for endpoint path + fork owner for head= filter.
+    endpoint_owner_repo = owner_repo
+    head_owner = owner
+    try:
+        is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
+        if ok and is_fork_val == "true":
+            parent_val, pok = gh_api_jq(f"repos/{owner_repo}", ".parent.full_name")
+            if pok and parent_val and parent_val != "null":
+                endpoint_owner_repo = parent_val
+    except Exception:
+        pass  # fallback to current behavior
+
+    endpoint_owner, endpoint_repo = endpoint_owner_repo.split("/", 1)
+    endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
     val, ok = gh_api_jq(endpoint, ".[0].number")
     if not ok:
         die(f"failed to look up PR for branch '{branch}'")

@@ -170,8 +170,25 @@ resolve_pr_number() {
   owner_repo=$(resolve_owner_repo)
   local owner=${owner_repo%%/*}
   local repo=${owner_repo#*/}
+
+  # On forks, PRs live on the upstream (parent) repo. Detect fork and
+  # use parent for endpoint path + fork owner for head= filter.
+  local endpoint_owner_repo="$owner_repo"
+  local head_owner="$owner"
+  local is_fork
+  is_fork=$(gh api "repos/$owner_repo" --jq '.fork' 2>/dev/null) || is_fork="false"
+  if [ "$is_fork" = "true" ]; then
+    local parent
+    parent=$(gh api "repos/$owner_repo" --jq '.parent.full_name' 2>/dev/null) || parent=""
+    if [ -n "$parent" ]; then
+      endpoint_owner_repo="$parent"
+    fi
+  fi
+
+  local endpoint_owner=${endpoint_owner_repo%%/*}
+  local endpoint_repo=${endpoint_owner_repo#*/}
   local pr_data rc
-  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
+  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$endpoint_owner/$endpoint_repo/pulls?head=$head_owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
     :
   else
     rc=$?
