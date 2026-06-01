@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # Python logs command tests using mock executables via GH_PR_CONTEXT_GH/GIT env vars.
 
@@ -17,13 +16,6 @@ HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 pass=${pass:-0}
 fail=${fail:-0}
 _MOCK_DIR=""
-
-_summary_on_exit() {
-  if [ "${fail:-0}" -gt 0 ]; then
-    echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
-  fi
-}
-trap _summary_on_exit EXIT
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -336,22 +328,31 @@ test_py_logs_missing_pr_value() {
   assert_stderr_contains "logs --pr without value gives clear message" "missing value for --pr" $python_cmd "$python_script" logs --pr
 }
 
+test_names+=(
+  test_py_logs_failed_check_shows_log
+  test_py_logs_all_passing_no_output
+  test_py_logs_multiple_failures
+  test_py_logs_truncation_at_500_lines
+  test_py_logs_truncation_notice_format
+  test_py_logs_under_500_no_truncation
+  test_py_logs_log_fetch_fails_shows_placeholder
+  test_py_logs_sha_lookup_failure
+  test_py_logs_exits_zero
+  test_py_logs_help_exits_zero
+  test_py_logs_unknown_option_exits_nonzero
+  test_py_logs_missing_pr_value
+)
+
 # --- Run tests (only when executed directly, not sourced) ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  test_names=(
-    test_py_logs_failed_check_shows_log
-    test_py_logs_all_passing_no_output
-    test_py_logs_multiple_failures
-    test_py_logs_truncation_at_500_lines
-    test_py_logs_truncation_notice_format
-    test_py_logs_under_500_no_truncation
-    test_py_logs_log_fetch_fails_shows_placeholder
-    test_py_logs_sha_lookup_failure
-    test_py_logs_exits_zero
-    test_py_logs_help_exits_zero
-    test_py_logs_unknown_option_exits_nonzero
-    test_py_logs_missing_pr_value
-  )
+  set -euo pipefail
+
+  _summary_on_exit() {
+    if [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
+    fi
+  }
+  trap _summary_on_exit EXIT
 
   echo "--- test_python_logs.sh"
   for t in "${test_names[@]}"; do

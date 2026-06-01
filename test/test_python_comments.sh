@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # Python comments command tests using mock executables via GH_PR_CONTEXT_GH/GIT env vars.
 
@@ -15,13 +14,6 @@ fi
 pass=${pass:-0}
 fail=${fail:-0}
 _MOCK_DIR=""
-
-_summary_on_exit() {
-  if [ "${fail:-0}" -gt 0 ]; then
-    echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
-  fi
-}
-trap _summary_on_exit EXIT
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -279,21 +271,30 @@ test_py_comments_missing_pr_value() {
   assert_stderr_contains "comments --pr without value gives clear message" "missing value for --pr" $python_cmd "$python_script" comments --pr
 }
 
+test_names+=(
+  test_py_comments_empty_pr_no_output
+  test_py_comments_review_only
+  test_py_comments_issue_only
+  test_py_comments_sorted_by_date
+  test_py_comments_review_with_replies
+  test_py_comments_issue_stays_flat
+  test_py_comments_review_no_replies
+  test_py_comments_exits_zero_on_success
+  test_py_comments_help_exits_zero
+  test_py_comments_unknown_option_exits_nonzero
+  test_py_comments_missing_pr_value
+)
+
 # --- Run tests (only when executed directly, not sourced) ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  test_names=(
-    test_py_comments_empty_pr_no_output
-    test_py_comments_review_only
-    test_py_comments_issue_only
-    test_py_comments_sorted_by_date
-    test_py_comments_review_with_replies
-    test_py_comments_issue_stays_flat
-    test_py_comments_review_no_replies
-    test_py_comments_exits_zero_on_success
-    test_py_comments_help_exits_zero
-    test_py_comments_unknown_option_exits_nonzero
-    test_py_comments_missing_pr_value
-  )
+  set -euo pipefail
+
+  _summary_on_exit() {
+    if [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
+    fi
+  }
+  trap _summary_on_exit EXIT
 
   echo "--- test_python_comments.sh"
   for t in "${test_names[@]}"; do

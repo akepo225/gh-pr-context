@@ -231,13 +231,13 @@ setup_mocks_fork() {
   }
   gh() {
     case "$*" in
-      *"repos/forkuser/widgets"*.fork*) echo "true" ;;
-      *"repos/forkuser/widgets"*.parent*) echo "acme/widgets" ;;
-      *"pulls?head=forkuser:my-feature"*) echo '77' ;;
-      *"pulls/77/comments"*) echo '[]' ;;
-      *"issues/77/comments"*) echo '[]' ;;
-      *"pulls/77"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-      *"check-runs"*) echo '{"total_count":0,"check_runs":[]}' ;;
+      *"repos/forkuser/widgets"*--jq*.fork*) echo "true" ;;
+      *"repos/forkuser/widgets"*--jq*.parent*) echo "acme/widgets" ;;
+      *"repos/acme/widgets/pulls?head=forkuser:my-feature"*) echo '77' ;;
+      *"repos/acme/widgets/pulls/77/comments"*) echo '[]' ;;
+      *"repos/acme/widgets/issues/77/comments"*) echo '[]' ;;
+      *"repos/acme/widgets/pulls/77"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
+      *"repos/acme/widgets/commits/"*"check-runs"*) echo '{"total_count":0,"check_runs":[]}' ;;
       *) exit 1 ;;
     esac
   }

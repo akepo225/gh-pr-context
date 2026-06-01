@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # Python status command tests using mock executables via GH_PR_CONTEXT_GH/GIT env vars.
 
@@ -17,13 +16,6 @@ HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 pass=${pass:-0}
 fail=${fail:-0}
 _MOCK_DIR=""
-
-_summary_on_exit() {
-  if [ "${fail:-0}" -gt 0 ]; then
-    echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
-  fi
-}
-trap _summary_on_exit EXIT
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -277,21 +269,30 @@ test_py_status_paginated_merges_all_checks() {
   fi
 }
 
+test_names+=(
+  test_py_status_completed_check
+  test_py_status_in_progress_omits_conclusion
+  test_py_status_sorted_by_name
+  test_py_status_empty_checks
+  test_py_status_multiple_conclusions
+  test_py_status_sha_lookup_failure
+  test_py_status_exits_zero
+  test_py_status_help_exits_zero
+  test_py_status_unknown_option_exits_nonzero
+  test_py_status_missing_pr_value
+  test_py_status_paginated_merges_all_checks
+)
+
 # --- Run tests (only when executed directly, not sourced) ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  test_names=(
-    test_py_status_completed_check
-    test_py_status_in_progress_omits_conclusion
-    test_py_status_sorted_by_name
-    test_py_status_empty_checks
-    test_py_status_multiple_conclusions
-    test_py_status_sha_lookup_failure
-    test_py_status_exits_zero
-    test_py_status_help_exits_zero
-    test_py_status_unknown_option_exits_nonzero
-    test_py_status_missing_pr_value
-    test_py_status_paginated_merges_all_checks
-  )
+  set -euo pipefail
+
+  _summary_on_exit() {
+    if [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
+    fi
+  }
+  trap _summary_on_exit EXIT
 
   echo "--- test_python_status.sh"
   for t in "${test_names[@]}"; do
