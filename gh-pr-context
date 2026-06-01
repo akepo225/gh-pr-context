@@ -977,7 +977,7 @@ cmd_monitor_all() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local prev_sha
   if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then

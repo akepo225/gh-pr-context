@@ -112,7 +112,8 @@ def _setup_git_env():
 
     git_file = os.path.join(work_tree, ".git")
     try:
-        content = open(git_file).read().strip()
+        with open(git_file, "r") as f:
+            content = f.read().strip()
     except OSError:
         return
 
@@ -178,7 +179,7 @@ def resolve_pr_number():
     global _resolved_owner_repo
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
-    owner, repo = owner_repo.split("/", 1)
+    owner, _repo = owner_repo.split("/", 1)
 
     # On forks, PRs live on the upstream (parent) repo. Detect fork and
     # use parent for endpoint path + fork owner for head= filter.

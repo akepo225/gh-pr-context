@@ -56,39 +56,6 @@ setup_mocks_with_pr() {
   }
 }
 
-# setup_mocks_with_pr_and_replies sets up git/gh mock functions for a pull request: the first argument is the JSON array for review comments, the second is the JSON array for issue comments, and any additional arguments are reply specs in the form "<comment_id>:<json>" which are exported as _MOCK_REPLY_<comment_id> and tracked in _MOCK_REPLY_IDS.
-setup_mocks_with_pr_and_replies() {
-  _MOCK_PR_REVIEWS="$1"
-  _MOCK_PR_ISSUES="$2"
-  shift 2
-
-  setup_mocks
-  _clear_reply_vars
-
-  local reply_spec cid rdata
-  for reply_spec in "$@"; do
-    cid="${reply_spec%%:*}"
-    rdata="${reply_spec#*:}"
-    export "_MOCK_REPLY_${cid}=$rdata"
-    _MOCK_REPLY_IDS="$_MOCK_REPLY_IDS $cid"
-  done
-
-  gh() {
-    case "$*" in
-      *"pulls?head=acme:feature-branch"*) echo '[{"number":42}]' ;;
-      *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
-      *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
-      *"pulls/comments/"*"/replies"*)
-        local cid
-        cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
-        local var="_MOCK_REPLY_${cid}"
-        echo "${!var:-[]}"
-        ;;
-      *) exit 1 ;;
-    esac
-  }
-}
-
 # run_script runs the test script under the current mock environment.
 # It exports the mocked git/gh functions and the mock state variables, then invokes bash on $script with any provided arguments.
 run_script() {
@@ -338,7 +305,9 @@ test_comments_replies_sorted_under_parent() {
   fi
 }
 
-# test_comments_reply_in_main_response_not_duplicated ensures a reply that appears inline in the main review list and also via the replies endpoint is printed exactly once.
+# test_comments_reply_in_main_response_not_duplicated verifies that an inline
+# reply (with in_reply_to_id set) is grouped under its parent and printed
+# exactly once via client-side grouping.
 test_comments_reply_in_main_response_not_duplicated() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":102,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"inline reply"}]'
   setup_mocks_with_pr "$review_json" '[]'

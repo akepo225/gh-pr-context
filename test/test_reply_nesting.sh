@@ -15,26 +15,14 @@ setup_mocks_base() {
   }
 }
 
-_MOCK_REPLY_IDS=""
-
-# _clear_reply_vars unsets all per-reply `_MOCK_REPLY_<id>` variables and clears the `_MOCK_REPLY_IDS` list.
-_clear_reply_vars() {
-  for cid in $_MOCK_REPLY_IDS; do
-    unset "_MOCK_REPLY_${cid}" 2>/dev/null || true
-  done
-  _MOCK_REPLY_IDS=""
-}
-
 # setup_mocks_nesting sets up shell mocks for nesting tests.
 # The first argument is PR review JSON (should include inline replies with in_reply_to_id),
 # the second is issue comment JSON.
 setup_mocks_nesting() {
   _MOCK_PR_REVIEWS="$1"
   _MOCK_PR_ISSUES="$2"
-  shift 2
 
   setup_mocks_base
-  _clear_reply_vars
 
   gh() {
     case "$*" in
@@ -50,7 +38,6 @@ setup_mocks_nesting() {
 run_script() {
   export -f git gh
   export _MOCK_PR_REVIEWS _MOCK_PR_ISSUES
-  # _MOCK_REPLY_* vars are exported by setup_mocks_nesting
   timeout 15 bash "$script" "$@" </dev/null
 }
 
