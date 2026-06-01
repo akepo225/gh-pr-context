@@ -160,6 +160,17 @@ resolve_owner_repo() {
   echo "$owner_repo"
 }
 
+# resolved_owner_repo returns the owner/repo to use for API endpoints.
+# After resolve_pr_number sets _RESOLVED_OWNER_REPO (e.g. to the parent repo
+# on forks), this function returns that value. Otherwise falls back to origin.
+resolved_owner_repo() {
+  if [ -n "${_RESOLVED_OWNER_REPO:-}" ]; then
+    echo "$_RESOLVED_OWNER_REPO"
+  else
+    resolve_owner_repo
+  fi
+}
+
 # resolve_pr_number prints the open PR number for the current branch. The
 # optional timeout argument is passed through to _timed_gh_api.
 resolve_pr_number() {
@@ -196,6 +207,8 @@ resolve_pr_number() {
   if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
     die "no open PR found for branch '$branch'"
   fi
+  # Export the endpoint repo so callers use the parent for forks.
+  _RESOLVED_OWNER_REPO="$endpoint_owner_repo"
   echo "$pr_data"
 }
 
@@ -325,7 +338,7 @@ cmd_comments() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local review_json
   review_json=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate) \
@@ -381,7 +394,7 @@ cmd_status() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local sha
   sha=$(resolve_pr_head_sha "$pr_number") \
@@ -416,7 +429,7 @@ cmd_logs() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local sha
   sha=$(resolve_pr_head_sha "$pr_number" 2>/dev/null) \
@@ -680,7 +693,7 @@ cmd_monitor_status() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local prev_sha
   prev_sha=$(resolve_pr_head_sha "$pr_number") \
@@ -830,7 +843,7 @@ cmd_monitor_comments() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local _monitor_interrupted=0
   trap '_monitor_interrupted=1' INT TERM

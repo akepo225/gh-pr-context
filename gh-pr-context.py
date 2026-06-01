@@ -96,7 +96,7 @@ def _setup_git_env():
     2. Worktree with Windows absolute path (C:/...): convert to /mnt/c/...
     3. Worktree with relative gitdir: resolve relative to worktree root.
     """
-    out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+    _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
     if rc == 0:
         return  # git works, nothing to do
 
@@ -131,7 +131,7 @@ def _setup_git_env():
         if os.path.isdir(resolved):
             os.environ["GIT_DIR"] = resolved
             os.environ["GIT_WORK_TREE"] = work_tree
-            out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
             if rc == 0:
                 return
             os.environ.pop("GIT_DIR", None)
@@ -143,7 +143,7 @@ def _setup_git_env():
         if os.path.isdir(abs_path):
             os.environ["GIT_DIR"] = abs_path
             os.environ["GIT_WORK_TREE"] = work_tree
-            out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
             if rc == 0:
                 return
             os.environ.pop("GIT_DIR", None)
@@ -171,7 +171,11 @@ def resolve_owner_repo():
     return m.group(1)
 
 
+_resolved_owner_repo = None
+
+
 def resolve_pr_number():
+    global _resolved_owner_repo
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
     owner, repo = owner_repo.split("/", 1)
@@ -189,6 +193,7 @@ def resolve_pr_number():
     except Exception:
         pass  # fallback to current behavior
 
+    _resolved_owner_repo = endpoint_owner_repo
     endpoint_owner, endpoint_repo = endpoint_owner_repo.split("/", 1)
     endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
     val, ok = gh_api_jq(endpoint, ".[0].number")
@@ -197,6 +202,17 @@ def resolve_pr_number():
     if not val or val == "null":
         die(f"no open PR found for branch '{branch}'")
     return val
+
+
+def get_owner_repo():
+    """Return the resolved owner/repo for API endpoints.
+
+    After resolve_pr_number sets _resolved_owner_repo (e.g. to the parent
+    repo on forks), this returns that value. Otherwise falls back to origin.
+    """
+    if _resolved_owner_repo is not None:
+        return _resolved_owner_repo
+    return resolve_owner_repo()
 
 
 def validate_since_format(value):
@@ -310,7 +326,7 @@ def cmd_status(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     sha = resolve_pr_head_sha(pr_number)
     if not sha:
@@ -368,7 +384,7 @@ def cmd_logs(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     sha = resolve_pr_head_sha(pr_number)
     if not sha:
@@ -480,7 +496,7 @@ def cmd_comments(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     review_raw, ok = gh_api_paginated(f"repos/{owner_repo}/pulls/{pr_number}/comments")
     if not ok:
