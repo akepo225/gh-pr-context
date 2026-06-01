@@ -88,6 +88,68 @@ def gh_api_jq(endpoint, jq_filter):
     return result.stdout.strip().replace("\r", ""), True
 
 
+def _setup_git_env():
+    """Resolve worktree gitdir when git rev-parse --git-dir fails.
+
+    Handles three cases:
+    1. Normal repo: git works, nothing to do.
+    2. Worktree with Windows absolute path (C:/...): convert to /mnt/c/...
+    3. Worktree with relative gitdir: resolve relative to worktree root.
+    """
+    out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+    if rc == 0:
+        return  # git works, nothing to do
+
+    # Walk up to find the worktree root where .git is a file
+    work_tree = os.getcwd()
+    while work_tree != os.path.dirname(work_tree):
+        git_file = os.path.join(work_tree, ".git")
+        if os.path.isfile(git_file):
+            break
+        work_tree = os.path.dirname(work_tree)
+    else:
+        return  # no .git file found
+
+    git_file = os.path.join(work_tree, ".git")
+    try:
+        content = open(git_file).read().strip()
+    except OSError:
+        return
+
+    # Parse "gitdir: <path>"
+    m = re.match(r"^gitdir:\s+(.+)$", content)
+    if not m:
+        return
+    gitdir_path = m.group(1).strip()
+
+    # Case 1: Windows absolute path (C:/...) → WSL /mnt/c/...
+    win_match = re.match(r"^([A-Za-z]):(/.*)$", gitdir_path)
+    if win_match:
+        drive = win_match.group(1).lower()
+        rest = win_match.group(2)
+        resolved = f"/mnt/{drive}{rest}"
+        if os.path.isdir(resolved):
+            os.environ["GIT_DIR"] = resolved
+            os.environ["GIT_WORK_TREE"] = work_tree
+            out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            if rc == 0:
+                return
+            os.environ.pop("GIT_DIR", None)
+            os.environ.pop("GIT_WORK_TREE", None)
+
+    # Case 2: Non-absolute path → resolve relative to worktree root
+    if not os.path.isabs(gitdir_path):
+        abs_path = os.path.normpath(os.path.join(work_tree, gitdir_path))
+        if os.path.isdir(abs_path):
+            os.environ["GIT_DIR"] = abs_path
+            os.environ["GIT_WORK_TREE"] = work_tree
+            out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            if rc == 0:
+                return
+            os.environ.pop("GIT_DIR", None)
+            os.environ.pop("GIT_WORK_TREE", None)
+
+
 def check_deps():
     from shutil import which
     git_bin = _git_cmd()[0]
@@ -95,9 +157,10 @@ def check_deps():
     for label, binary in (("git", git_bin), ("gh", gh_bin)):
         if not which(binary):
             die(f"{label} is required but not found on PATH")
+    _setup_git_env()
     out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
     if rc != 0:
-        die("not a git repository")
+        die("not a git repository (or worktree path could not be resolved)")
 
 
 def resolve_owner_repo():
