@@ -168,13 +168,11 @@ resolve_pr_number() {
   branch=$(git rev-parse --abbrev-ref HEAD) || die "failed to determine current branch"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  local owner=${owner_repo%%/*}
-  local repo=${owner_repo#*/}
+  local head_owner=${owner_repo%%/*}
 
   # On forks, PRs live on the upstream (parent) repo. Detect fork and
   # use parent for endpoint path + fork owner for head= filter.
   local endpoint_owner_repo="$owner_repo"
-  local head_owner="$owner"
   local is_fork
   is_fork=$(gh api "repos/$owner_repo" --jq '.fork' 2>/dev/null) || is_fork="false"
   if [ "$is_fork" = "true" ]; then
