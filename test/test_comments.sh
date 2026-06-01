@@ -257,9 +257,8 @@ test_comments_multiple_review_sorted() {
 
 # test_comments_review_with_replies verifies that the comments command prints a reply block for a review comment that has replies and includes the reply's author, body, and created timestamp.
 test_comments_review_with_replies() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"src/main.sh","line":5,"body":"done, fixed"}]'
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF ">>> reply" \
@@ -276,7 +275,7 @@ test_comments_review_with_replies() {
 # test_comments_review_no_replies verifies that a review comment with no replies is displayed without a ">>> reply" block.
 test_comments_review_no_replies() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]'
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF "review-comment" && ! echo "$output" | grep -qF ">>> reply"; then
@@ -289,9 +288,8 @@ test_comments_review_no_replies() {
 
 # test_comments_mixed_replies verifies that a review with replies shows a reply block while another review without replies does not.
 test_comments_mixed_replies() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"has replies"},{"id":102,"user":{"login":"carol"},"created_at":"2025-01-01T09:00:00Z","path":"b.sh","line":2,"body":"no replies"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"reply here"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"has replies"},{"id":102,"user":{"login":"carol"},"created_at":"2025-01-01T09:00:00Z","path":"b.sh","line":2,"body":"no replies"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"reply here"}]'
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local alice_block carol_block
@@ -308,10 +306,9 @@ test_comments_mixed_replies() {
 
 # test_comments_issue_stays_flat verifies that issue comments remain flat (no `>>>` reply markers) even when review comments have replies.
 test_comments_issue_stays_flat() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"},{"id":201,"in_reply_to_id":101,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"a.sh","line":1,"body":"a reply"}]'
   local issue_json='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"issue comment"}]'
-  local replies_data='[{"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","body":"a reply"}]'
-  setup_mocks_with_pr_and_replies "$review_json" "$issue_json" "101:$replies_data"
+  setup_mocks_with_pr "$review_json" "$issue_json"
   local output
   output=$(run_script comments --pr 42 2>&1)
   local issue_block
@@ -327,9 +324,8 @@ test_comments_issue_stays_flat() {
 
 # test_comments_replies_sorted_under_parent verifies that replies to a review are sorted by `created_at` so the earliest reply is shown first.
 test_comments_replies_sorted_under_parent() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local replies_data='[{"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","body":"later reply"},{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"earlier reply"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":202,"in_reply_to_id":101,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"a.sh","line":1,"body":"later reply"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"earlier reply"}]'
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local first_reply_author
@@ -345,8 +341,7 @@ test_comments_replies_sorted_under_parent() {
 # test_comments_reply_in_main_response_not_duplicated ensures a reply that appears inline in the main review list and also via the replies endpoint is printed exactly once.
 test_comments_reply_in_main_response_not_duplicated() {
   local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":102,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"inline reply"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"inline reply"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local reply_count
@@ -479,9 +474,8 @@ test_since_last_commit_includes_equal() {
 # It sets up a parent review with one old and one new reply, runs `comments --pr 42 --since 2025-06-01T00:00:00`,
 # and asserts that only the reply on/after the cutoff appears in the output.
 test_since_filters_replies_too() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-07-01T10:00:00Z","path":"a.sh","line":1,"body":"new parent"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-05-01T10:00:00Z","body":"old reply"},{"user":{"login":"carol"},"created_at":"2025-08-01T10:00:00Z","body":"new reply"}]'
-  setup_mocks_with_pr_and_replies "$review_json" '[]' "101:$replies_data"
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-07-01T10:00:00Z","path":"a.sh","line":1,"body":"new parent"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-05-01T10:00:00Z","path":"a.sh","line":1,"body":"old reply"},{"id":202,"in_reply_to_id":101,"user":{"login":"carol"},"created_at":"2025-08-01T10:00:00Z","path":"a.sh","line":1,"body":"new reply"}]'
+  setup_mocks_with_pr "$review_json" '[]'
   local output
   output=$(run_script comments --pr 42 --since 2025-06-01T00:00:00 2>&1)
   if echo "$output" | grep -qF "carol" \
@@ -519,10 +513,11 @@ test_since_unknown_sha_stderr_message() {
   fi
 }
 
-# test_comments_crlf_in_review_ids verifies that reply fetching works correctly when jq produces Windows-style CRLF output, which leaves trailing \r on comment IDs without the tr -d '\r' strip in cmd_comments.
+# test_comments_crlf_in_review_ids verifies that reply grouping works correctly
+# when jq produces Windows-style CRLF output. With client-side reply grouping,
+# CRLF in IDs no longer affects URL construction (the old N+1 /replies pattern).
 test_comments_crlf_in_review_ids() {
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"src/main.sh","line":5,"body":"done, fixed"}]'
   local issue_json='[]'
 
   _MOCK_PR_REVIEWS="$review_json"
@@ -530,24 +525,13 @@ test_comments_crlf_in_review_ids() {
 
   setup_mocks
   _clear_reply_vars
-  export "_MOCK_REPLY_101=$replies_data"
-  _MOCK_REPLY_IDS="101"
 
   gh() {
     case "$*" in
       *"pulls?head=acme:feature-branch"*) echo '[{"number":42}]' ;;
       *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
       *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
-      *"pulls/comments/"*"/replies"*)
-        if ! echo "$*" | grep -qP 'pulls/comments/\d+/replies'; then
-          echo 'parse error: invalid control character in URL' >&2
-          exit 1
-        fi
-        local cid
-        cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
-        local var="_MOCK_REPLY_${cid}"
-        echo "${!var:-[]}"
-        ;;
+      *"pulls/comments/"*"/replies"*) echo '[]' ;;
       *) exit 1 ;;
     esac
   }

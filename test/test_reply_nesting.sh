@@ -25,8 +25,9 @@ _clear_reply_vars() {
   _MOCK_REPLY_IDS=""
 }
 
-# setup_mocks_nesting sets up shell mocks and exports mock PR review, issue, and per-comment reply data used by nesting tests.
-# The first argument is PR review JSON, the second is issue comment JSON, and remaining arguments are reply specs of the form `cid:rdata` which are exported as `_MOCK_REPLY_<cid>`.
+# setup_mocks_nesting sets up shell mocks for nesting tests.
+# The first argument is PR review JSON (should include inline replies with in_reply_to_id),
+# the second is issue comment JSON.
 setup_mocks_nesting() {
   _MOCK_PR_REVIEWS="$1"
   _MOCK_PR_ISSUES="$2"
@@ -35,24 +36,11 @@ setup_mocks_nesting() {
   setup_mocks_base
   _clear_reply_vars
 
-  local reply_spec cid rdata
-  for reply_spec in "$@"; do
-    cid="${reply_spec%%:*}"
-    rdata="${reply_spec#*:}"
-    export "_MOCK_REPLY_${cid}=$rdata"
-    _MOCK_REPLY_IDS="$_MOCK_REPLY_IDS $cid"
-  done
-
   gh() {
     case "$*" in
       *"pulls/42/comments"*) echo "$_MOCK_PR_REVIEWS" ;;
       *"issues/42/comments"*) echo "$_MOCK_PR_ISSUES" ;;
-      *"pulls/comments/"*"/replies"*)
-        local cid
-        cid=$(echo "$*" | sed -E 's/.*pulls\/comments\/([0-9]+)\/replies.*/\1/')
-        local var="_MOCK_REPLY_${cid}"
-        echo "${!var:-[]}"
-        ;;
+      *"pulls/comments/"*"/replies"*) echo '[]' ;;
       *) exit 1 ;;
     esac
   }
@@ -82,9 +70,8 @@ test_names+=(
 
 # test_nesting_reply_block_present verifies that when a PR review comment has a nested reply, the script output includes the ">>> reply" marker.
 test_nesting_reply_block_present() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"nested reply"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply"
+  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":20,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"nested reply"}]'
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF ">>> reply"; then
@@ -96,9 +83,8 @@ test_nesting_reply_block_present() {
 }
 
 test_nesting_reply_appears_after_parent() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent comment"}]'
-  local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"nested reply"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply"
+  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent comment"},{"id":20,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"nested reply"}]'
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local parent_line reply_line
@@ -115,9 +101,8 @@ test_nesting_reply_appears_after_parent() {
 # test_nesting_reply_uses_marker verifies that a nested reply is rendered with the '>>> reply' marker in the script output.
 # Sets up one review and one reply, runs the script for the PR, and passes only if the output contains ">>> reply".
 test_nesting_reply_uses_marker() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"p"}]'
-  local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"r"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply"
+  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"p"},{"id":20,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"r"}]'
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF ">>> reply"; then
@@ -129,9 +114,8 @@ test_nesting_reply_uses_marker() {
 }
 
 test_nesting_reply_contains_author_created_body() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"p"}]'
-  local reply='[{"user":{"login":"replyuser"},"created_at":"2025-06-01T08:00:00Z","body":"reply body text"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply"
+  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"p"},{"id":20,"in_reply_to_id":10,"user":{"login":"replyuser"},"created_at":"2025-06-01T08:00:00Z","path":"a.sh","line":1,"body":"reply body text"}]'
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF "author: replyuser" \
@@ -150,8 +134,7 @@ test_nesting_in_reply_to_id_not_top_level() {
     {"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},
     {"id":11,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"inline child"}
   ]'
-  local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"inline child"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply"
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local block_count
@@ -196,11 +179,11 @@ test_nesting_issue_comment_no_reply_marker() {
 test_nesting_multiple_parents_independent_replies() {
   local review='[
     {"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent A"},
-    {"id":20,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"b.sh","line":2,"body":"parent B"}
+    {"id":20,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"b.sh","line":2,"body":"parent B"},
+    {"id":30,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"reply to A"},
+    {"id":40,"in_reply_to_id":20,"user":{"login":"dave"},"created_at":"2025-01-01T13:00:00Z","path":"b.sh","line":2,"body":"reply to B"}
   ]'
-  local reply10='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"reply to A"}]'
-  local reply20='[{"user":{"login":"dave"},"created_at":"2025-01-01T13:00:00Z","body":"reply to B"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply10" "20:$reply20"
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF "reply to A" && echo "$output" | grep -qF "reply to B"; then
@@ -215,10 +198,10 @@ test_nesting_multiple_parents_independent_replies() {
 test_nesting_reply_only_under_correct_parent() {
   local review='[
     {"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent A"},
-    {"id":20,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"b.sh","line":2,"body":"parent B"}
+    {"id":20,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"b.sh","line":2,"body":"parent B"},
+    {"id":30,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"only for A"}
   ]'
-  local reply10='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"only for A"}]'
-  setup_mocks_nesting "$review" '[]' "10:$reply10"
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local parent_b_section
@@ -233,13 +216,13 @@ test_nesting_reply_only_under_correct_parent() {
 
 # test_nesting_replies_sorted_chronologically verifies that replies attached to a review are emitted in ascending order by `created_at` (earliest reply appears first).
 test_nesting_replies_sorted_chronologically() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local replies='[
-    {"user":{"login":"charlie"},"created_at":"2025-01-03T10:00:00Z","body":"third"},
-    {"user":{"login":"bob"},"created_at":"2025-01-02T10:00:00Z","body":"second"},
-    {"user":{"login":"alice"},"created_at":"2025-01-01T11:00:00Z","body":"first"}
+  local review='[
+    {"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},
+    {"id":21,"in_reply_to_id":10,"user":{"login":"charlie"},"created_at":"2025-01-03T10:00:00Z","path":"a.sh","line":1,"body":"third"},
+    {"id":22,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-02T10:00:00Z","path":"a.sh","line":1,"body":"second"},
+    {"id":20,"in_reply_to_id":10,"user":{"login":"alice"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"first"}
   ]'
-  setup_mocks_nesting "$review" '[]' "10:$replies"
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local first_reply_body
@@ -254,12 +237,12 @@ test_nesting_replies_sorted_chronologically() {
 
 # test_nesting_multiple_replies_under_one_parent verifies that two reply blocks are rendered under a single parent review comment; increments `pass` if exactly two `>>> reply` markers are found, otherwise increments `fail` and prints a FAIL message with the captured output.
 test_nesting_multiple_replies_under_one_parent() {
-  local review='[{"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local replies='[
-    {"user":{"login":"bob"},"created_at":"2025-01-02T10:00:00Z","body":"reply one"},
-    {"user":{"login":"carol"},"created_at":"2025-01-03T10:00:00Z","body":"reply two"}
+  local review='[
+    {"id":10,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},
+    {"id":20,"in_reply_to_id":10,"user":{"login":"bob"},"created_at":"2025-01-02T10:00:00Z","path":"a.sh","line":1,"body":"reply one"},
+    {"id":21,"in_reply_to_id":10,"user":{"login":"carol"},"created_at":"2025-01-03T10:00:00Z","path":"a.sh","line":1,"body":"reply two"}
   ]'
-  setup_mocks_nesting "$review" '[]' "10:$replies"
+  setup_mocks_nesting "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   local reply_count

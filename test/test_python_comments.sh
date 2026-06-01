@@ -170,12 +170,10 @@ test_py_comments_sorted_by_date() {
 test_py_comments_review_with_replies() {
   setup_mock_dir
   write_git_mock
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"src/main.sh","line":5,"body":"done, fixed"}]'
   write_gh_mock "
     *\"pulls/42/comments\"*) echo '$review_json' ;;
     *\"issues/42/comments\"*) echo '[]' ;;
-    *\"pulls/comments/101/replies\"*) echo '$replies_data' ;;
     *\"pulls/comments/\"*\"/replies\"*) echo '[]' ;;"
   local output
   output=$(run_python comments --pr 42 2>&1)
@@ -194,13 +192,11 @@ test_py_comments_review_with_replies() {
 test_py_comments_issue_stays_flat() {
   setup_mock_dir
   write_git_mock
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"},{"id":201,"in_reply_to_id":101,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"a.sh","line":1,"body":"a reply"}]'
   local issue_json='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"issue comment"}]'
-  local replies_data='[{"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","body":"a reply"}]'
   write_gh_mock "
     *\"pulls/42/comments\"*) echo '$review_json' ;;
     *\"issues/42/comments\"*) echo '$issue_json' ;;
-    *\"pulls/comments/101/replies\"*) echo '$replies_data' ;;
     *\"pulls/comments/\"*\"/replies\"*) echo '[]' ;;"
   local output
   output=$(run_python comments --pr 42 2>&1)

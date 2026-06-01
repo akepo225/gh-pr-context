@@ -406,33 +406,25 @@ def cmd_comments(argv):
             "body": c.get("body", ""),
         })
 
-    review_ids = [str(item["id"]) for item in review_items]
-
+    # The review comments endpoint already includes replies (they have
+    # in_reply_to_id set). Group replies client-side instead of N+1 API calls.
     replies_map = {}
-    for cid in review_ids:
-        endpoint = f"repos/{owner_repo}/pulls/comments/{cid}/replies"
-        replies_raw, ok = gh_api_paginated(endpoint)
-        if not ok:
-            print(f"warning: failed to fetch replies for comment {cid}", file=sys.stderr)
-            replies_raw = "[]"
-        replies_data = parse_paginated_json(replies_raw)
+    for c in review_data:
+        parent_id = c.get("in_reply_to_id")
+        if parent_id is None:
+            continue
+        if since_ref and c.get("created_at", "") < since_ref:
+            continue
+        parent_key = str(parent_id)
+        replies_map.setdefault(parent_key, []).append({
+            "author": c["user"]["login"],
+            "created": c["created_at"],
+            "body": c.get("body", ""),
+        })
 
-        if since_ref:
-            replies_data = [r for r in replies_data if r.get("created_at", "") >= since_ref]
-
-        reply_fields = sorted(
-            [
-                {
-                    "author": r["user"]["login"],
-                    "created": r["created_at"],
-                    "body": r.get("body", ""),
-                }
-                for r in replies_data
-            ],
-            key=lambda x: x["created"],
-        )
-        if reply_fields:
-            replies_map[cid] = reply_fields
+    # Sort each reply group by created_at
+    for cid in replies_map:
+        replies_map[cid].sort(key=lambda x: x["created"])
 
     for item in review_items:
         cid = str(item["id"])
