@@ -19,6 +19,7 @@ setup_mocks() {
 }
 
 # setup_mocks_logs sets up git/gh mocks where `gh` returns `HEAD_SHA` for `pulls/42`, the first argument as the `check-runs` JSON, and the second argument as the logs content (args: 1 = check-runs JSON, 2 = log content).
+# The mock also serves a synthetic jobs response for /check-runs/{id}/jobs, mapping check-run IDs to job IDs.
 setup_mocks_logs() {
   _MOCK_CHECK_RUNS="$1"
   _MOCK_LOG_CONTENT="$2"
@@ -26,6 +27,12 @@ setup_mocks_logs() {
   gh() {
     case "$*" in
       *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs/"*"jobs"*)
+        # Extract check-run ID from the URL and return a matching jobs response
+        local cr_id
+        cr_id=$(echo "$*" | sed -E 's/.*check-runs\/([0-9]+)\/jobs.*/\1/')
+        echo "{\"total_count\":1,\"jobs\":[{\"id\":${cr_id}}]}"
+        ;;
       *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
       *"logs"*) printf '%s' "$_MOCK_LOG_CONTENT" ;;
       *) exit 1 ;;
@@ -49,6 +56,11 @@ setup_mocks_logs_multi() {
   gh() {
     case "$*" in
       *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs/"*"jobs"*)
+        local cr_id
+        cr_id=$(echo "$*" | sed -E 's/.*check-runs\/([0-9]+)\/jobs.*/\1/')
+        echo "{\"total_count\":1,\"jobs\":[{\"id\":${cr_id}}]}"
+        ;;
       *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
       *"logs"*)
         local jid
@@ -72,6 +84,11 @@ setup_mocks_logs_auto() {
     case "$*" in
       *"pulls?head=acme:feature-branch"*) echo '42' ;;
       *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs/"*"jobs"*)
+        local cr_id
+        cr_id=$(echo "$*" | sed -E 's/.*check-runs\/([0-9]+)\/jobs.*/\1/')
+        echo "{\"total_count\":1,\"jobs\":[{\"id\":${cr_id}}]}"
+        ;;
       *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
       *"logs"*) printf '%s' "$_MOCK_LOG_CONTENT" ;;
       *) exit 1 ;;
@@ -109,6 +126,11 @@ setup_mocks_logs_no_log() {
   gh() {
     case "$*" in
       *"pulls/42"*) echo "$HEAD_SHA" ;;
+      *"check-runs/"*"jobs"*)
+        local cr_id
+        cr_id=$(echo "$*" | sed -E 's/.*check-runs\/([0-9]+)\/jobs.*/\1/')
+        echo "{\"total_count\":1,\"jobs\":[{\"id\":${cr_id}}]}"
+        ;;
       *"check-runs"*) echo "$_MOCK_CHECK_RUNS" ;;
       *"logs"*) exit 1 ;;
       *) exit 1 ;;

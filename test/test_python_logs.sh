@@ -108,6 +108,7 @@ test_py_logs_failed_check_shows_log() {
   local log_content="Running tests...\nTest failed: expected 200 got 500"
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) printf '%s' '$log_content' ;;"
   local output
@@ -152,6 +153,8 @@ test_py_logs_multiple_failures() {
   win_mock_dir=$(mock_path "$_MOCK_DIR")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
+    *\"check-runs/222/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":222}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_mock_dir/log_111.txt' ;;
     *\"jobs/222/logs\"*) cat '$win_mock_dir/log_222.txt' ;;"
@@ -179,6 +182,7 @@ test_py_logs_truncation_at_500_lines() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -203,6 +207,7 @@ test_py_logs_truncation_notice_format() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -225,6 +230,7 @@ test_py_logs_under_500_no_truncation() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -244,6 +250,7 @@ test_py_logs_log_fetch_fails_shows_placeholder() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;"
   local output
   output=$(run_python logs --pr 42 2>&1)
@@ -282,6 +289,7 @@ test_py_logs_exits_zero() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   assert_exit 0 "logs exits 0 on success" run_python logs --pr 42

@@ -316,16 +316,34 @@ def cmd_logs(argv):
         return
 
     for run in failed:
-        job_id = run["id"]
+        check_run_id = run["id"]
         name = run["name"]
-        log_content = ""
+
+        # Resolve real job IDs from the check-run (check-run IDs ≠ job IDs)
+        job_ids = []
         try:
-            args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
-            result = subprocess.run(args, capture_output=True, text=True)
-            if result.returncode == 0:
-                log_content = result.stdout
+            jobs_args = _gh_cmd() + ["api", f"repos/{owner_repo}/check-runs/{check_run_id}/jobs"]
+            jobs_result = subprocess.run(jobs_args, capture_output=True, text=True)
+            if jobs_result.returncode == 0:
+                jobs_data = json.loads(jobs_result.stdout)
+                for job in jobs_data.get("jobs", []):
+                    if "id" in job:
+                        job_ids.append(job["id"])
         except Exception:
             pass
+
+        log_content = ""
+        for job_id in job_ids:
+            try:
+                args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
+                result = subprocess.run(args, capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout:
+                    if log_content:
+                        log_content += "\n" + result.stdout
+                    else:
+                        log_content = result.stdout
+            except Exception:
+                pass
 
         print("--- log")
         print(f"name: {name}")
