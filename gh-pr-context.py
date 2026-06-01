@@ -205,15 +205,33 @@ def resolve_pr_number():
     return val
 
 
+def _detect_fork_parent(owner_repo):
+    """Detect if owner_repo is a fork and return the parent repo, or the
+    original if not a fork. Caches the result in _resolved_owner_repo."""
+    global _resolved_owner_repo
+    try:
+        is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
+        if ok and is_fork_val == "true":
+            parent_val, pok = gh_api_jq(f"repos/{owner_repo}", ".parent.full_name")
+            if pok and parent_val and parent_val != "null":
+                _resolved_owner_repo = parent_val
+                return parent_val
+    except Exception:
+        pass
+    _resolved_owner_repo = owner_repo
+    return owner_repo
+
+
 def get_owner_repo():
     """Return the resolved owner/repo for API endpoints.
 
     After resolve_pr_number sets _resolved_owner_repo (e.g. to the parent
-    repo on forks), this returns that value. Otherwise falls back to origin.
+    repo on forks), this returns that value. Otherwise detects fork and
+    caches the parent repo. Falls back to origin if not a fork.
     """
     if _resolved_owner_repo is not None:
         return _resolved_owner_repo
-    return resolve_owner_repo()
+    return _detect_fork_parent(resolve_owner_repo())
 
 
 def validate_since_format(value):
@@ -297,7 +315,7 @@ def resolve_since_timestamp(since_input):
 
 
 def resolve_pr_head_sha(pr_number):
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
     val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
     if not ok or not val:
         return None

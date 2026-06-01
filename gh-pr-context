@@ -162,13 +162,28 @@ resolve_owner_repo() {
 
 # resolved_owner_repo returns the owner/repo to use for API endpoints.
 # After resolve_pr_number sets _RESOLVED_OWNER_REPO (e.g. to the parent repo
-# on forks), this function returns that value. Otherwise falls back to origin.
+# on forks), this function returns that value. Otherwise detects fork and
+# caches the parent repo. Falls back to origin if not a fork.
 resolved_owner_repo() {
   if [ -n "${_RESOLVED_OWNER_REPO:-}" ]; then
     echo "$_RESOLVED_OWNER_REPO"
-  else
-    resolve_owner_repo
+    return
   fi
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+  local is_fork
+  is_fork=$(gh api "repos/$owner_repo" --jq '.fork' 2>/dev/null) || is_fork="false"
+  if [ "$is_fork" = "true" ]; then
+    local parent
+    parent=$(gh api "repos/$owner_repo" --jq '.parent.full_name' 2>/dev/null) || parent=""
+    if [ -n "$parent" ]; then
+      _RESOLVED_OWNER_REPO="$parent"
+      echo "$parent"
+      return
+    fi
+  fi
+  _RESOLVED_OWNER_REPO="$owner_repo"
+  echo "$owner_repo"
 }
 
 # resolve_pr_number prints the open PR number for the current branch. The
@@ -218,7 +233,7 @@ resolve_pr_head_sha() {
   local pr_number=$1
   local timeout_secs="${2:-}"
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
   _timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
@@ -367,7 +382,7 @@ cmd_comments() {
   merged=$(printf '%s\n%s\n' "$review_json" "$issue_json" | jq -s 'flatten | sort_by(.created)')
 
   if [ -n "$since_ref" ]; then
-    merged=$(echo "$merged" | jq --arg since "$since_ref" '[.[] | select(.created >= $since)]')
+    merged=$(echo "$merged" | jq --arg since "$since_ref" '[.[] | select(.created >= $since or ((.replies // []) | length) > 0)]')
   fi
 
   echo "$merged" | jq -r '.[] | if .source == "review-comment" then "--- review-comment\nauthor: \(.author)\ncreated: \(.created)\npath: \(.path)\nline: \(.line)\nbody: \(.body)" + (if (.replies | length) > 0 then "\n" + (.replies | map(">>> reply\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)") | join("\n")) else "" end) else "--- issue-comment\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)" end'
