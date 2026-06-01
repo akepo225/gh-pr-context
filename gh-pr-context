@@ -171,15 +171,19 @@ resolved_owner_repo() {
   fi
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  local is_fork
-  is_fork=$(gh api "repos/$owner_repo" --jq '.fork' 2>/dev/null) || is_fork="false"
-  if [ "$is_fork" = "true" ]; then
-    local parent
-    parent=$(gh api "repos/$owner_repo" --jq '.parent.full_name' 2>/dev/null) || parent=""
-    if [ -n "$parent" ]; then
-      _RESOLVED_OWNER_REPO="$parent"
-      echo "$parent"
-      return
+  local repo_json
+  repo_json=$(gh api "repos/$owner_repo" 2>/dev/null) || repo_json=""
+  if [ -n "$repo_json" ]; then
+    local is_fork
+    is_fork=$(echo "$repo_json" | jq -r '.fork // "false"' 2>/dev/null) || is_fork="false"
+    if [ "$is_fork" = "true" ]; then
+      local parent
+      parent=$(echo "$repo_json" | jq -r '.parent.full_name // ""' 2>/dev/null) || parent=""
+      if [ -n "$parent" ]; then
+        _RESOLVED_OWNER_REPO="$parent"
+        echo "$parent"
+        return
+      fi
     fi
   fi
   _RESOLVED_OWNER_REPO="$owner_repo"
