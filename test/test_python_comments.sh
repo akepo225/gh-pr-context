@@ -290,9 +290,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   set -euo pipefail
 
   _summary_on_exit() {
-    if [ "${fail:-0}" -gt 0 ]; then
-      echo "FAILED: ${fail} test(s) failed, ${pass} passed" >&2
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: exit ${rc}, ${fail:-0} test(s) failed, ${pass:-0} passed" >&2
     fi
+    exit "$rc"
   }
   trap _summary_on_exit EXIT
 
