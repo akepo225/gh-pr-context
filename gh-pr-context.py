@@ -3,8 +3,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 VERSION = "0.2.5"
@@ -312,6 +314,309 @@ def resolve_pr_head_sha(pr_number):
     return val
 
 
+def parse_duration(input_str):
+    if not input_str:
+        die("invalid duration: (empty)")
+    m = re.match(r"^(\d+)(s|m|h)$", input_str)
+    if not m:
+        die(f"invalid duration: {input_str} (expected <number><s|m|h>)")
+    num = int(m.group(1))
+    suffix = m.group(2)
+    if suffix == "s":
+        return num
+    if suffix == "m":
+        return num * 60
+    return num * 3600
+
+
+def _timed_gh_api_paginated(endpoint, timeout_secs=None):
+    args = _gh_cmd() + ["api", "--paginate", endpoint]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout_secs
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    if result.returncode != 0:
+        return None, "error"
+    return result.stdout, "ok"
+
+
+def _capture_check_snapshot(owner_repo, sha, timeout_secs=None):
+    checks_raw, status = _timed_gh_api_paginated(
+        f"repos/{owner_repo}/commits/{sha}/check-runs", timeout_secs
+    )
+    if status == "timeout":
+        return None, "timeout"
+    if status != "ok":
+        return None, "error"
+    checks_data = parse_paginated_json(checks_raw)
+    all_runs = []
+    for page in checks_data:
+        if isinstance(page, dict) and "check_runs" in page:
+            all_runs.extend(page["check_runs"])
+    snapshot = sorted(
+        [
+            {
+                "name": r.get("name", ""),
+                "status": r.get("status", ""),
+                "conclusion": r.get("conclusion"),
+            }
+            for r in all_runs
+        ],
+        key=lambda x: x["name"],
+    )
+    return snapshot, "ok"
+
+
+def _compute_status_diff(prev_snapshot, cur_snapshot):
+    prev_by_name = {c["name"]: c for c in prev_snapshot}
+    cur_by_name = {c["name"]: c for c in cur_snapshot}
+    all_names = sorted(set(prev_by_name.keys()) | set(cur_by_name.keys()))
+    changes = []
+    for name in all_names:
+        old = prev_by_name.get(name)
+        new = cur_by_name.get(name)
+        if old is None:
+            changes.append(
+                {
+                    "check": name,
+                    "from": "absent",
+                    "to": new["status"],
+                    "conclusion": new["conclusion"],
+                }
+            )
+        elif new is None:
+            changes.append(
+                {
+                    "check": name,
+                    "from": old["status"],
+                    "to": "absent",
+                    "conclusion": None,
+                }
+            )
+        elif (
+            old["status"] != new["status"]
+            or (old.get("conclusion") or "") != (new.get("conclusion") or "")
+        ):
+            changes.append(
+                {
+                    "check": name,
+                    "from": old["status"],
+                    "to": new["status"],
+                    "conclusion": new["conclusion"],
+                }
+            )
+    return changes
+
+
+def _format_status_changes(changes):
+    parts = []
+    for c in changes:
+        block = [
+            "--- change",
+            "type: status",
+            f"check: {c['check']}",
+            f"from: {c['from']}",
+            f"to: {c['to']}",
+        ]
+        if c.get("conclusion") is not None and c["to"] != "absent":
+            block.append(f"conclusion: {c['conclusion']}")
+        parts.append("\n".join(block))
+    return "\n".join(parts)
+
+
+def _monitor_call_timeout(timeout_secs, start_mono):
+    if timeout_secs is None:
+        return None
+    remaining = timeout_secs - (time.monotonic() - start_mono)
+    if remaining <= 0:
+        return "expired"
+    return remaining
+
+
+def cmd_monitor_status(argv):
+    pr_number = ""
+    interval = 30
+    timeout_input = ""
+    timeout_secs = None
+    check_filter = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--pr":
+            if i + 1 >= len(argv):
+                die("missing value for --pr")
+            pr_number = argv[i + 1]
+            i += 2
+        elif arg == "--interval":
+            if i + 1 >= len(argv):
+                die("missing value for --interval")
+            interval = argv[i + 1]
+            i += 2
+            if not re.match(r"^[1-9][0-9]*$", interval):
+                die(
+                    f"invalid --interval value: {interval} (expected a positive integer)"
+                )
+            interval = int(interval)
+        elif arg == "--timeout":
+            if i + 1 >= len(argv):
+                die("missing value for --timeout")
+            timeout_input = argv[i + 1]
+            i += 2
+            timeout_secs = parse_duration(timeout_input)
+        elif arg == "--check":
+            if i + 1 >= len(argv):
+                die("missing value for --check")
+            val = argv[i + 1]
+            if not val:
+                die("missing value for --check")
+            if val.startswith("-"):
+                die("missing value for --check")
+            check_filter = val
+            i += 2
+        elif arg in ("-h", "--help"):
+            usage_monitor_status()
+            sys.exit(0)
+        else:
+            die(f"unknown option: {arg}")
+
+    check_deps()
+
+    if not pr_number:
+        pr_number = resolve_pr_number()
+
+    owner_repo = get_owner_repo()
+
+    prev_sha = resolve_pr_head_sha(pr_number)
+    if not prev_sha:
+        die(f"failed to resolve head SHA for PR #{pr_number}")
+
+    prev_snapshot, snap_status = _capture_check_snapshot(owner_repo, prev_sha)
+    if snap_status != "ok":
+        die(f"failed to fetch check runs for SHA {prev_sha}")
+    if check_filter:
+        prev_snapshot = [c for c in prev_snapshot if c["name"] == check_filter]
+
+    interrupted = False
+
+    def _handle_signal(signum, frame):
+        nonlocal interrupted
+        interrupted = True
+
+    original_sigint = signal.signal(signal.SIGINT, _handle_signal)
+    original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+
+    start_mono = time.monotonic()
+
+    try:
+        while True:
+            if timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            sleep_for = interval
+            if timeout_secs is not None:
+                remaining = timeout_secs - (time.monotonic() - start_mono)
+                if remaining < sleep_for:
+                    sleep_for = max(remaining, 0)
+            try:
+                time.sleep(sleep_for)
+            except OSError:
+                pass
+
+            if interrupted:
+                pass
+            elif timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_sha = resolve_pr_head_sha(pr_number)
+            if cur_sha is None:
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+
+            if cur_sha != prev_sha:
+                print("--- change")
+                print("type: new-commit")
+                print(f"sha: {cur_sha}")
+                if interrupted:
+                    sys.exit(130)
+                sys.exit(0)
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_snapshot, snap_status = _capture_check_snapshot(
+                owner_repo, cur_sha, call_timeout
+            )
+            if snap_status == "timeout":
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+            if snap_status != "ok":
+                die("failed to fetch check runs during poll")
+            if check_filter:
+                cur_snapshot = [
+                    c for c in cur_snapshot if c["name"] == check_filter
+                ]
+
+            changes = _compute_status_diff(prev_snapshot, cur_snapshot)
+
+            if changes:
+                print(_format_status_changes(changes))
+                if interrupted:
+                    sys.exit(130)
+                sys.exit(0)
+
+            if interrupted:
+                sys.exit(130)
+
+            prev_sha = cur_sha
+            prev_snapshot = cur_snapshot
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+
+
+def cmd_monitor(argv):
+    if not argv:
+        die("missing monitor sub-command (see 'gh-pr-context monitor --help')")
+
+    sub_command = argv[0]
+    rest = argv[1:]
+
+    if sub_command == "status":
+        cmd_monitor_status(rest)
+    elif sub_command in ("-h", "--help"):
+        usage_monitor()
+        sys.exit(0)
+    else:
+        die(f"unknown monitor sub-command: {sub_command}")
+
+
 def cmd_status(argv):
     pr_number = ""
     i = 0
@@ -610,6 +915,7 @@ def usage():
     print("  comments   Fetch PR comments")
     print("  status     Fetch CI check status")
     print("  logs       Fetch logs for failed CI checks")
+    print("  monitor    Poll for CI/comment changes")
     print("")
     print("options:")
     print("  --pr <number>   PR number (auto-detected from branch if omitted)")
@@ -617,6 +923,30 @@ def usage():
     print("  --all           Return all comments (default)")
     print("  --version       Show version")
     print("  -h, --help      Show this message")
+
+
+def usage_monitor():
+    print("usage: gh-pr-context monitor <sub-command> [options]")
+    print("")
+    print("sub-commands:")
+    print("  status   Poll for check status changes")
+    print("")
+    print("options:")
+    print("  -h, --help   Show this message")
+
+
+def usage_monitor_status():
+    print("usage: gh-pr-context monitor status [options]")
+    print("")
+    print("Poll for check status/conclusion changes and new commits.")
+    print("Exits 0 on change, 1 on error, 2 on timeout, 130 on signal.")
+    print("")
+    print("options:")
+    print("  --pr <number>       PR number (auto-detected from branch if omitted)")
+    print("  --interval <secs>   Poll interval in seconds (default: 30)")
+    print("  --timeout <dur>     Maximum time to poll (e.g. 30s, 5m, 1h)")
+    print("  --check <name>      Only watch the named check")
+    print("  -h, --help          Show this message")
 
 
 def main(argv):
@@ -644,6 +974,9 @@ def main(argv):
         return 0
     if command == "logs":
         cmd_logs(rest)
+        return 0
+    if command == "monitor":
+        cmd_monitor(rest)
         return 0
 
     return die(f"unknown command: {command}")
