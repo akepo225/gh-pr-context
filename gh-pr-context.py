@@ -90,6 +90,23 @@ def gh_api_jq(endpoint, jq_filter):
     return result.stdout.strip().replace("\r", ""), True
 
 
+def _timed_gh_api_jq(endpoint, jq_filter, timeout_secs=None):
+    """Like gh_api_jq but with a subprocess timeout.
+
+    Returns (value, status) where status is "ok", "timeout", or "error".
+    """
+    args = _gh_cmd() + ["api", endpoint, "--jq", jq_filter]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout_secs
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    if result.returncode != 0:
+        return None, "error"
+    return result.stdout.strip().replace("\r", ""), "ok"
+
+
 def _setup_git_env():
     """Resolve worktree gitdir when git rev-parse --git-dir fails.
 
@@ -306,12 +323,21 @@ def resolve_since_timestamp(since_input):
     die(f"invalid --since value: {since_input} (expected: last-commit, <7-40 char SHA>, YYYY-MM-DD, or YYYY-MM-DDTHH:mm:ss)")
 
 
-def resolve_pr_head_sha(pr_number):
+def resolve_pr_head_sha(pr_number, timeout_secs=None):
     owner_repo = get_owner_repo()
+    if timeout_secs is not None:
+        val, status = _timed_gh_api_jq(
+            f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha", timeout_secs
+        )
+        if status == "timeout":
+            return None, "timeout"
+        if status == "error" or not val:
+            return None, "error"
+        return val, "ok"
     val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
     if not ok or not val:
-        return None
-    return val
+        return None, "error"
+    return val, "ok"
 
 
 def parse_duration(input_str):
@@ -370,8 +396,12 @@ def _capture_check_snapshot(owner_repo, sha, timeout_secs=None):
 
 
 def _compute_status_diff(prev_snapshot, cur_snapshot):
-    prev_by_name = {c["name"]: c for c in prev_snapshot}
-    cur_by_name = {c["name"]: c for c in cur_snapshot}
+    prev_by_name = {}
+    for c in prev_snapshot:
+        prev_by_name.setdefault(c["name"], c)
+    cur_by_name = {}
+    for c in cur_snapshot:
+        cur_by_name.setdefault(c["name"], c)
     all_names = sorted(set(prev_by_name.keys()) | set(cur_by_name.keys()))
     changes = []
     for name in all_names:
@@ -488,8 +518,8 @@ def cmd_monitor_status(argv):
 
     owner_repo = get_owner_repo()
 
-    prev_sha = resolve_pr_head_sha(pr_number)
-    if not prev_sha:
+    prev_sha, sha_status = resolve_pr_head_sha(pr_number)
+    if sha_status != "ok":
         die(f"failed to resolve head SHA for PR #{pr_number}")
 
     prev_snapshot, snap_status = _capture_check_snapshot(owner_repo, prev_sha)
@@ -544,14 +574,16 @@ def cmd_monitor_status(argv):
                 print(f"monitor timed out after {timeout_input}", file=sys.stderr)
                 sys.exit(2)
 
-            cur_sha = resolve_pr_head_sha(pr_number)
-            if cur_sha is None:
+            cur_sha, sha_status = resolve_pr_head_sha(pr_number, call_timeout)
+            if sha_status == "timeout":
                 print(
                     "gh api call timed out; retrying next poll", file=sys.stderr
                 )
                 if interrupted:
                     sys.exit(130)
                 continue
+            if sha_status != "ok":
+                die(f"failed to re-resolve head SHA for PR #{pr_number}")
 
             if cur_sha != prev_sha:
                 print("--- change")
@@ -642,8 +674,8 @@ def cmd_status(argv):
 
     owner_repo = get_owner_repo()
 
-    sha = resolve_pr_head_sha(pr_number)
-    if not sha:
+    sha, sha_status = resolve_pr_head_sha(pr_number)
+    if sha_status != "ok":
         die(f"failed to resolve head SHA for PR #{pr_number}")
 
     checks_raw, ok = gh_api_paginated(f"repos/{owner_repo}/commits/{sha}/check-runs")
@@ -700,8 +732,8 @@ def cmd_logs(argv):
 
     owner_repo = get_owner_repo()
 
-    sha = resolve_pr_head_sha(pr_number)
-    if not sha:
+    sha, sha_status = resolve_pr_head_sha(pr_number)
+    if sha_status != "ok":
         die(f"failed to resolve head SHA for PR #{pr_number}")
 
     checks_raw, ok = gh_api_paginated(f"repos/{owner_repo}/commits/{sha}/check-runs")

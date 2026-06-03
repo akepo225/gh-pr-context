@@ -656,6 +656,62 @@ test_py_usage_lists_monitor() {
   fi
 }
 
+test_py_monitor_status_sha_error_dies() {
+  setup_mock_dir
+  write_git_mock
+  echo 0 > "$_MOCK_DIR/counter"
+  cat > "$_MOCK_DIR/gh" << GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"repos/acme/widgets"*"--jq"*".fork"*) echo 'false'; exit 0 ;;
+esac
+call_num=\$(cat $_MOCK_DIR/counter)
+call_num=\$((call_num + 1))
+echo "\$call_num" > "$_MOCK_DIR/counter"
+case "\$*" in
+  *"pulls/42"*"--jq"*)
+    if [ "\$call_num" -le 1 ]; then
+      echo '$HEAD_SHA'
+    else
+      exit 1
+    fi
+    ;;
+  *"check-runs"*)
+    echo '{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
+    ;;
+  *) exit 1 ;;
+esac
+GHEOF
+  chmod +x "$_MOCK_DIR/gh"
+  local output
+  output=$(run_python monitor status --pr 42 --interval 1 2>&1) && rc=0 || rc=$?
+  cleanup_mock_dir
+  if [ "$rc" -ne 0 ] && echo "$output" | grep -qi "failed.*head SHA\|failed.*re-resolve"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: SHA auth error should die, not retry (rc=$rc, output: $output)"
+  fi
+}
+
+test_py_monitor_status_duplicate_check_keeps_first() {
+  setup_mock_dir
+  write_git_mock
+  local initial='{"total_count":2,"check_runs":[{"name":"CI","status":"queued","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
+  local changed='{"total_count":2,"check_runs":[{"name":"CI","status":"queued","conclusion":null},{"name":"CI","status":"completed","conclusion":"success"}]}'
+  write_gh_stateful_mock "$initial" "$changed"
+  local output
+  output=$(run_python monitor status --pr 42 --interval 1 2>&1)
+  cleanup_mock_dir
+  if echo "$output" | grep -qF "from: queued" \
+    && echo "$output" | grep -qF "to: completed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: duplicate check name should keep first occurrence (output: $output)"
+  fi
+}
+
 test_names+=(
   test_py_monitor_status_single_check_change
   test_py_monitor_status_multiple_changes_sorted
@@ -694,6 +750,8 @@ test_names+=(
   test_py_monitor_status_check_case_sensitive
   test_py_monitor_status_help_shows_check
   test_py_usage_lists_monitor
+  test_py_monitor_status_sha_error_dies
+  test_py_monitor_status_duplicate_check_keeps_first
 )
 
 # --- Run tests (only when executed directly, not sourced) ---
