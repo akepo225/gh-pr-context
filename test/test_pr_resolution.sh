@@ -84,6 +84,7 @@ test_names+=(
   test_pr_resolution_no_pr_found_stderr_message
   test_pr_resolution_api_fail_exits_nonzero
   test_pr_resolution_api_fail_stderr_message
+  test_pr_resolution_fork_uses_parent_for_endpoint
 )
 
 # test_pr_resolution_auto_detect_comments verifies that auto-detect resolves PR 99 and that running `comments` succeeds; it updates the global `pass`/`fail` counters and prints a failure message with the exit code when it fails.
@@ -213,5 +214,46 @@ test_pr_resolution_api_fail_stderr_message() {
   else
     fail=$((fail + 1))
     echo "FAIL: API failure should emit a failure message (output: $output)"
+  fi
+}
+
+# setup_mocks_fork sets up mocks where origin points to a fork (forkuser/widgets),
+# the repo API reports .fork=true and .parent.full_name=acme/widgets.
+# PR lookup uses parent repo with fork owner as head filter.
+setup_mocks_fork() {
+  git() {
+    case "$*" in
+      "rev-parse --git-dir") echo ".git" ;;
+      "remote get-url origin") echo "https://github.com/forkuser/widgets.git" ;;
+      "rev-parse --abbrev-ref HEAD") echo "my-feature" ;;
+      *) exit 1 ;;
+    esac
+  }
+  gh() {
+    case "$*" in
+      *"repos/forkuser/widgets"*--jq*.fork*) echo "true" ;;
+      *"repos/forkuser/widgets"*--jq*.parent*) echo "acme/widgets" ;;
+      *"repos/acme/widgets/pulls?head=forkuser:my-feature"*) echo '77' ;;
+      *"repos/acme/widgets/pulls/77/comments"*) echo '[]' ;;
+      *"repos/acme/widgets/issues/77/comments"*) echo '[]' ;;
+      *"repos/acme/widgets/pulls/77"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
+      *"repos/acme/widgets/commits/"*"check-runs"*) echo '{"total_count":0,"check_runs":[]}' ;;
+      *) exit 1 ;;
+    esac
+  }
+}
+
+# test_pr_resolution_fork_uses_parent_for_endpoint verifies that when origin
+# is a fork, auto-detection queries the parent repo (acme/widgets) with the
+# fork owner (forkuser) as the head filter.
+test_pr_resolution_fork_uses_parent_for_endpoint() {
+  setup_mocks_fork
+  local exit_code=0
+  run_script comments >/dev/null 2>&1 || exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: fork auto-detect should resolve PR via parent repo (exit: $exit_code)"
   fi
 }

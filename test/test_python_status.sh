@@ -13,8 +13,9 @@ fi
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
-pass=0
-fail=0
+pass=${pass:-0}
+fail=${fail:-0}
+_MOCK_DIR=""
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -45,7 +46,7 @@ setup_mock_dir() {
 }
 
 cleanup_mock_dir() {
-  if [ -n "$_MOCK_DIR" ] && [ -d "$_MOCK_DIR" ]; then
+  if [ -n "${_MOCK_DIR:-}" ] && [ -d "$_MOCK_DIR" ]; then
     rm -rf "$_MOCK_DIR"
   fi
 }
@@ -268,8 +269,7 @@ test_py_status_paginated_merges_all_checks() {
   fi
 }
 
-# --- Run tests ---
-test_names=(
+test_names+=(
   test_py_status_completed_check
   test_py_status_in_progress_omits_conclusion
   test_py_status_sorted_by_name
@@ -283,11 +283,25 @@ test_names=(
   test_py_status_paginated_merges_all_checks
 )
 
-echo "--- test_python_status.sh"
-for t in "${test_names[@]}"; do
-  "$t"
-done
+# --- Run tests (only when executed directly, not sourced) ---
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
 
-echo ""
-echo "$pass passed, $fail failed"
-[ "$fail" -eq 0 ]
+  _summary_on_exit() {
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: exit ${rc}, ${fail:-0} test(s) failed, ${pass:-0} passed" >&2
+    fi
+    exit "$rc"
+  }
+  trap _summary_on_exit EXIT
+
+  echo "--- test_python_status.sh"
+  for t in "${test_names[@]}"; do
+    "$t"
+  done
+
+  echo ""
+  echo "$pass passed, $fail failed" >&2
+  [ "$fail" -eq 0 ]
+fi

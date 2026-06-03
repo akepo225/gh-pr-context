@@ -35,6 +35,7 @@ _export_signal_mocks() {
   export _MOCK_INITIAL _MOCK_CHANGED
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
   export _MOCK_REVIEWS _MOCK_ISSUES
+  export _RESOLVED_OWNER_REPO
 }
 
 cleanup_signal_tmpdir() {
@@ -73,6 +74,7 @@ test_names+=(
 test_signal_status_with_change_exits_130() {
   _skip_check "signal status with change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_INITIAL='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
   _MOCK_CHANGED='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
   _MOCK_COUNTER_FILE=$(mktemp)
@@ -124,6 +126,7 @@ test_signal_status_with_change_exits_130() {
 test_signal_status_no_change_exits_130_silent() {
   _skip_check "signal status no change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_INITIAL='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
   sleep() { command sleep "$@"; }
   git() {
@@ -160,6 +163,7 @@ test_signal_status_no_change_exits_130_silent() {
 test_signal_status_sigterm_with_change_exits_130() {
   _skip_check "signal SIGTERM status with change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_INITIAL='{"total_count":2,"check_runs":[{"name":"Build","status":"in_progress","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
   _MOCK_CHANGED='{"total_count":2,"check_runs":[{"name":"Build","status":"completed","conclusion":"success"},{"name":"CI","status":"completed","conclusion":"failure"}]}'
   _MOCK_COUNTER_FILE=$(mktemp)
@@ -211,6 +215,7 @@ test_signal_status_sigterm_with_change_exits_130() {
 test_signal_comments_with_change_exits_130() {
   _skip_check "signal comments with change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_INITIAL_REVIEWS='[{"id":101,"in_reply_to_id":null}]'
   _MOCK_INITIAL_ISSUES='[]'
   _MOCK_CHANGED_REVIEWS='[{"id":101,"in_reply_to_id":null},{"id":102,"in_reply_to_id":null}]'
@@ -274,6 +279,7 @@ test_signal_comments_with_change_exits_130() {
 test_signal_comments_no_change_exits_130_silent() {
   _skip_check "signal comments no change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_REVIEWS='[{"id":101,"in_reply_to_id":null}]'
   _MOCK_ISSUES='[{"id":201}]'
   sleep() { command sleep "$@"; }
@@ -315,6 +321,7 @@ test_signal_comments_no_change_exits_130_silent() {
 test_signal_comments_sigterm_no_change_exits_130() {
   _skip_check "signal SIGTERM comments no change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_REVIEWS='[{"id":101,"in_reply_to_id":null}]'
   _MOCK_ISSUES='[{"id":201}]'
   sleep() { command sleep "$@"; }
@@ -357,6 +364,7 @@ test_signal_comments_sigterm_no_change_exits_130() {
 test_signal_all_with_change_exits_130() {
   _skip_check "signal all with change" && return 0
 
+  _RESOLVED_OWNER_REPO="acme/widgets"
   _MOCK_INITIAL='{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
   _MOCK_CHANGED='{"total_count":1,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"}]}'
   _MOCK_INITIAL_REVIEWS='[]'

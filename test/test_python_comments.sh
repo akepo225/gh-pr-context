@@ -11,8 +11,9 @@ else
   python_cmd="python3"
 fi
 
-pass=0
-fail=0
+pass=${pass:-0}
+fail=${fail:-0}
+_MOCK_DIR=""
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -43,7 +44,7 @@ setup_mock_dir() {
 }
 
 cleanup_mock_dir() {
-  if [ -n "$_MOCK_DIR" ] && [ -d "$_MOCK_DIR" ]; then
+  if [ -n "${_MOCK_DIR:-}" ] && [ -d "$_MOCK_DIR" ]; then
     rm -rf "$_MOCK_DIR"
   fi
 }
@@ -170,12 +171,10 @@ test_py_comments_sorted_by_date() {
 test_py_comments_review_with_replies() {
   setup_mock_dir
   write_git_mock
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"}]'
-  local replies_data='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"done, fixed"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"src/main.sh","line":5,"body":"nit: use double quotes"},{"id":201,"in_reply_to_id":101,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"src/main.sh","line":5,"body":"done, fixed"}]'
   write_gh_mock "
     *\"pulls/42/comments\"*) echo '$review_json' ;;
     *\"issues/42/comments\"*) echo '[]' ;;
-    *\"pulls/comments/101/replies\"*) echo '$replies_data' ;;
     *\"pulls/comments/\"*\"/replies\"*) echo '[]' ;;"
   local output
   output=$(run_python comments --pr 42 2>&1)
@@ -194,13 +193,11 @@ test_py_comments_review_with_replies() {
 test_py_comments_issue_stays_flat() {
   setup_mock_dir
   write_git_mock
-  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"}]'
+  local review_json='[{"id":101,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"review"},{"id":201,"in_reply_to_id":101,"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","path":"a.sh","line":1,"body":"a reply"}]'
   local issue_json='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"issue comment"}]'
-  local replies_data='[{"user":{"login":"carol"},"created_at":"2025-01-01T12:00:00Z","body":"a reply"}]'
   write_gh_mock "
     *\"pulls/42/comments\"*) echo '$review_json' ;;
     *\"issues/42/comments\"*) echo '$issue_json' ;;
-    *\"pulls/comments/101/replies\"*) echo '$replies_data' ;;
     *\"pulls/comments/\"*\"/replies\"*) echo '[]' ;;"
   local output
   output=$(run_python comments --pr 42 2>&1)
@@ -274,8 +271,7 @@ test_py_comments_missing_pr_value() {
   assert_stderr_contains "comments --pr without value gives clear message" "missing value for --pr" $python_cmd "$python_script" comments --pr
 }
 
-# --- Run tests ---
-test_names=(
+test_names+=(
   test_py_comments_empty_pr_no_output
   test_py_comments_review_only
   test_py_comments_issue_only
@@ -289,11 +285,25 @@ test_names=(
   test_py_comments_missing_pr_value
 )
 
-echo "--- test_python_comments.sh"
-for t in "${test_names[@]}"; do
-  "$t"
-done
+# --- Run tests (only when executed directly, not sourced) ---
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
 
-echo ""
-echo "$pass passed, $fail failed"
-[ "$fail" -eq 0 ]
+  _summary_on_exit() {
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: exit ${rc}, ${fail:-0} test(s) failed, ${pass:-0} passed" >&2
+    fi
+    exit "$rc"
+  }
+  trap _summary_on_exit EXIT
+
+  echo "--- test_python_comments.sh"
+  for t in "${test_names[@]}"; do
+    "$t"
+  done
+
+  echo ""
+  echo "$pass passed, $fail failed" >&2
+  [ "$fail" -eq 0 ]
+fi

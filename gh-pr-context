@@ -160,6 +160,36 @@ resolve_owner_repo() {
   echo "$owner_repo"
 }
 
+# resolved_owner_repo returns the owner/repo to use for API endpoints.
+# After resolve_pr_number sets _RESOLVED_OWNER_REPO (e.g. to the parent repo
+# on forks), this function returns that value. Otherwise detects fork and
+# caches the parent repo. Falls back to origin if not a fork.
+resolved_owner_repo() {
+  if [ -n "${_RESOLVED_OWNER_REPO:-}" ]; then
+    echo "$_RESOLVED_OWNER_REPO"
+    return
+  fi
+  local owner_repo
+  owner_repo=$(resolve_owner_repo)
+  local repo_json
+  repo_json=$(gh api "repos/$owner_repo" 2>/dev/null) || repo_json=""
+  if [ -n "$repo_json" ]; then
+    local is_fork
+    is_fork=$(echo "$repo_json" | jq -r '.fork // "false"' 2>/dev/null) || is_fork="false"
+    if [ "$is_fork" = "true" ]; then
+      local parent
+      parent=$(echo "$repo_json" | jq -r '.parent.full_name // ""' 2>/dev/null) || parent=""
+      if [ -n "$parent" ]; then
+        _RESOLVED_OWNER_REPO="$parent"
+        echo "$parent"
+        return
+      fi
+    fi
+  fi
+  _RESOLVED_OWNER_REPO="$owner_repo"
+  echo "$owner_repo"
+}
+
 # resolve_pr_number prints the open PR number for the current branch. The
 # optional timeout argument is passed through to _timed_gh_api.
 resolve_pr_number() {
@@ -168,10 +198,25 @@ resolve_pr_number() {
   branch=$(git rev-parse --abbrev-ref HEAD) || die "failed to determine current branch"
   local owner_repo
   owner_repo=$(resolve_owner_repo)
-  local owner=${owner_repo%%/*}
-  local repo=${owner_repo#*/}
+  local head_owner=${owner_repo%%/*}
+
+  # On forks, PRs live on the upstream (parent) repo. Detect fork and
+  # use parent for endpoint path + fork owner for head= filter.
+  local endpoint_owner_repo="$owner_repo"
+  local is_fork
+  is_fork=$(gh api "repos/$owner_repo" --jq '.fork' 2>/dev/null) || is_fork="false"
+  if [ "$is_fork" = "true" ]; then
+    local parent
+    parent=$(gh api "repos/$owner_repo" --jq '.parent.full_name' 2>/dev/null) || parent=""
+    if [ -n "$parent" ]; then
+      endpoint_owner_repo="$parent"
+    fi
+  fi
+
+  local endpoint_owner=${endpoint_owner_repo%%/*}
+  local endpoint_repo=${endpoint_owner_repo#*/}
   local pr_data rc
-  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$owner/$repo/pulls?head=$owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
+  if pr_data=$(_timed_gh_api "$timeout_secs" "repos/$endpoint_owner/$endpoint_repo/pulls?head=$head_owner:$branch" --paginate --jq '.[0].number' | tr -d '\r'); then
     :
   else
     rc=$?
@@ -181,6 +226,8 @@ resolve_pr_number() {
   if [ -z "$pr_data" ] || [ "$pr_data" = "null" ]; then
     die "no open PR found for branch '$branch'"
   fi
+  # Export the endpoint repo so callers use the parent for forks.
+  _RESOLVED_OWNER_REPO="$endpoint_owner_repo"
   echo "$pr_data"
 }
 
@@ -190,7 +237,7 @@ resolve_pr_head_sha() {
   local pr_number=$1
   local timeout_secs="${2:-}"
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
   _timed_gh_api "$timeout_secs" "repos/$owner_repo/pulls/$pr_number" --paginate --jq '.head.sha' | tr -d '\r'
 }
 
@@ -310,53 +357,37 @@ cmd_comments() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local review_json
   review_json=$(gh api "repos/$owner_repo/pulls/$pr_number/comments" --paginate) \
     || die "failed to fetch review comments for PR #$pr_number"
-  review_json=$(echo "$review_json" | jq '[.[] | select(.in_reply_to_id == null) | {source: "review-comment", id: .id, author: .user.login, created: .created_at, path: .path, line: (.line // 0), body: .body}]')
 
-  local review_ids
-  review_ids=$(echo "$review_json" | jq -r '.[].id // empty' | tr -d '\r')
-
-  local replies_map="{}"
-  for cid in $review_ids; do
-    local replies_raw
-    if ! replies_raw=$(gh api "repos/$owner_repo/pulls/comments/$cid/replies" --paginate 2>&1); then
-      if [[ "$replies_raw" == *"404"* ]]; then
-        replies_raw="[]"
-      else
-        die "failed to fetch replies for comment $cid: $replies_raw"
-      fi
-    fi
-    if [ -n "$since_ref" ]; then
-      replies_raw=$(echo "$replies_raw" | jq --arg since "$since_ref" '[.[] | select(.created_at >= $since)]')
-    fi
-    local reply_fields
-    reply_fields=$(echo "$replies_raw" | jq '[.[] | {author: .user.login, created: .created_at, body: .body}] | sort_by(.created)')
-    if [ "$reply_fields" = "[]" ] || [ -z "$reply_fields" ]; then
-      continue
-    fi
-    replies_map=$(echo "$replies_map" | jq --arg cid "$cid" --argjson replies "$reply_fields" '. + {($cid): $replies}')
-  done
-
-  if [ "$replies_map" != "{}" ]; then
-    review_json=$(echo "$review_json" | jq --argjson rmap "$replies_map" '[.[] | . + {replies: ($rmap[.id | tostring] // [])}]')
-  else
-    review_json=$(echo "$review_json" | jq '[.[] | . + {replies: []}]')
-  fi
+  # The review comments endpoint already includes replies (they have
+  # in_reply_to_id set). Group replies client-side instead of N+1 API calls.
+  review_json=$(echo "$review_json" | jq -s --arg since "${since_ref:-}" '
+    add as $all |
+    # Separate top-level comments from replies
+    ($all | map(select(.in_reply_to_id == null)) | map({source: "review-comment", id: .id, author: .user.login, created: .created_at, path: .path, line: (.line // 0), body: .body})) as $top |
+    # Group replies by their parent ID
+    ($all | map(select(.in_reply_to_id != null))
+      | if ($since | length) > 0 then map(select(.created_at >= $since)) else . end
+      | group_by(.in_reply_to_id)
+      | map({key: (.[0].in_reply_to_id | tostring), value: ([.[] | {author: .user.login, created: .created_at, body: .body}] | sort_by(.created))})
+      | from_entries) as $rmap |
+    $top | map(. + {replies: ($rmap[.id | tostring] // [])})
+  ')
 
   local issue_json
   issue_json=$(gh api "repos/$owner_repo/issues/$pr_number/comments" --paginate) \
     || die "failed to fetch issue comments for PR #$pr_number"
-  issue_json=$(echo "$issue_json" | jq '[.[] | {source: "issue-comment", author: .user.login, created: .created_at, body: .body}]')
+  issue_json=$(echo "$issue_json" | jq -s '[add | .[] | {source: "issue-comment", author: .user.login, created: .created_at, body: .body}]')
 
   local merged
   merged=$(printf '%s\n%s\n' "$review_json" "$issue_json" | jq -s 'flatten | sort_by(.created)')
 
   if [ -n "$since_ref" ]; then
-    merged=$(echo "$merged" | jq --arg since "$since_ref" '[.[] | select(.created >= $since)]')
+    merged=$(echo "$merged" | jq --arg since "$since_ref" '[.[] | select(.created >= $since or ((.replies // []) | length) > 0)]')
   fi
 
   echo "$merged" | jq -r '.[] | if .source == "review-comment" then "--- review-comment\nauthor: \(.author)\ncreated: \(.created)\npath: \(.path)\nline: \(.line)\nbody: \(.body)" + (if (.replies | length) > 0 then "\n" + (.replies | map(">>> reply\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)") | join("\n")) else "" end) else "--- issue-comment\nauthor: \(.author)\ncreated: \(.created)\nbody: \(.body)" end'
@@ -383,7 +414,7 @@ cmd_status() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local sha
   sha=$(resolve_pr_head_sha "$pr_number") \
@@ -418,7 +449,7 @@ cmd_logs() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local sha
   sha=$(resolve_pr_head_sha "$pr_number" 2>/dev/null) \
@@ -435,9 +466,33 @@ cmd_logs() {
     return 0
   fi
 
-  while IFS=$'\t' read -r id name; do
-    local log_content
-    log_content=$(gh api "repos/$owner_repo/actions/jobs/$id/logs" 2>/dev/null) || log_content=""
+  while IFS=$'\t' read -r check_run_id name; do
+    # Resolve real job IDs from the check-run (check-run IDs ≠ job IDs)
+    local jobs_json
+    jobs_json=$(gh api "repos/$owner_repo/check-runs/$check_run_id/jobs" 2>/dev/null) || jobs_json=""
+    local job_ids
+    if [ -n "$jobs_json" ]; then
+      job_ids=$(echo "$jobs_json" | jq -r '.jobs // [] | map(select(.id)) | .[].id' | tr -d '\r')
+    else
+      job_ids=""
+    fi
+
+    local log_content=""
+    if [ -n "$job_ids" ]; then
+      while IFS= read -r job_id; do
+        [ -n "$job_id" ] || continue
+        local job_log
+        job_log=$(gh api "repos/$owner_repo/actions/jobs/$job_id/logs" 2>/dev/null) || job_log=""
+        if [ -n "$job_log" ]; then
+          if [ -n "$log_content" ]; then
+            log_content="$log_content
+$job_log"
+          else
+            log_content="$job_log"
+          fi
+        fi
+      done <<< "$job_ids"
+    fi
 
     echo "--- log"
     echo "name: $name"
@@ -658,7 +713,7 @@ cmd_monitor_status() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local prev_sha
   prev_sha=$(resolve_pr_head_sha "$pr_number") \
@@ -808,7 +863,7 @@ cmd_monitor_comments() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local _monitor_interrupted=0
   trap '_monitor_interrupted=1' INT TERM
@@ -942,7 +997,7 @@ cmd_monitor_all() {
   fi
 
   local owner_repo
-  owner_repo=$(resolve_owner_repo)
+  owner_repo=$(resolved_owner_repo)
 
   local prev_sha
   if ! call_timeout=$(monitor_call_timeout "$timeout_secs" "$timeout_input"); then

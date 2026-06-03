@@ -236,9 +236,8 @@ test_fmt_issue_comment_no_raw_json() {
 
 # test_fmt_reply_marker verifies that a reply comment is emitted with a single-line ">>> reply" marker.
 test_fmt_reply_marker() {
-  local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local reply='[{"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","body":"a reply"}]'
-  setup_mocks_comments_with_reply "$review" "$reply"
+  local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":78,"in_reply_to_id":77,"user":{"login":"bob"},"created_at":"2025-01-01T11:00:00Z","path":"a.sh","line":1,"body":"a reply"}]'
+  setup_mocks_comments "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qxF ">>> reply"; then
@@ -251,9 +250,8 @@ test_fmt_reply_marker() {
 
 # test_fmt_reply_fields verifies that a reply block contains the `author`, `created`, and `body` fields.
 test_fmt_reply_fields() {
-  local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"}]'
-  local reply='[{"user":{"login":"replyauthor"},"created_at":"2025-03-15T09:00:00Z","body":"the reply body"}]'
-  setup_mocks_comments_with_reply "$review" "$reply"
+  local review='[{"id":77,"user":{"login":"alice"},"created_at":"2025-01-01T10:00:00Z","path":"a.sh","line":1,"body":"parent"},{"id":78,"in_reply_to_id":77,"user":{"login":"replyauthor"},"created_at":"2025-03-15T09:00:00Z","path":"a.sh","line":1,"body":"the reply body"}]'
+  setup_mocks_comments "$review" '[]'
   local output
   output=$(run_script comments --pr 42 2>&1)
   if echo "$output" | grep -qF "author: replyauthor" \

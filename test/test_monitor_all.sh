@@ -73,6 +73,7 @@ setup_counter_files() {
 }
 
 setup_mocks() {
+  _RESOLVED_OWNER_REPO="acme/widgets"
   git() {
     case "$*" in
       "rev-parse --git-dir") echo ".git" ;;
@@ -416,6 +417,7 @@ run_script() {
   export _MOCK_INITIAL_CHECKS _MOCK_CHANGED_CHECKS
   export _MOCK_INITIAL_REVIEWS _MOCK_INITIAL_ISSUES _MOCK_CHANGED_REVIEWS _MOCK_CHANGED_ISSUES
   export _MOCK_SHA_COUNTER_FILE _MOCK_CHECK_COUNTER_FILE _MOCK_REVIEW_COUNTER_FILE _MOCK_ISSUE_COUNTER_FILE
+  export _RESOLVED_OWNER_REPO
   timeout 15 bash "$script" "$@" </dev/null
 }
 

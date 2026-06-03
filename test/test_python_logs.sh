@@ -13,8 +13,9 @@ fi
 
 HEAD_SHA="abc123def456abc123def456abc123def456abc1"
 
-pass=0
-fail=0
+pass=${pass:-0}
+fail=${fail:-0}
+_MOCK_DIR=""
 
 assert_exit() {
   local expected_exit=$1 desc=$2; shift 2
@@ -45,7 +46,7 @@ setup_mock_dir() {
 }
 
 cleanup_mock_dir() {
-  if [ -n "$_MOCK_DIR" ] && [ -d "$_MOCK_DIR" ]; then
+  if [ -n "${_MOCK_DIR:-}" ] && [ -d "$_MOCK_DIR" ]; then
     rm -rf "$_MOCK_DIR"
   fi
 }
@@ -108,6 +109,7 @@ test_py_logs_failed_check_shows_log() {
   local log_content="Running tests...\nTest failed: expected 200 got 500"
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) printf '%s' '$log_content' ;;"
   local output
@@ -152,6 +154,8 @@ test_py_logs_multiple_failures() {
   win_mock_dir=$(mock_path "$_MOCK_DIR")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
+    *\"check-runs/222/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":222}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_mock_dir/log_111.txt' ;;
     *\"jobs/222/logs\"*) cat '$win_mock_dir/log_222.txt' ;;"
@@ -179,6 +183,7 @@ test_py_logs_truncation_at_500_lines() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -203,6 +208,7 @@ test_py_logs_truncation_notice_format() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -225,6 +231,7 @@ test_py_logs_under_500_no_truncation() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   local output
@@ -244,6 +251,7 @@ test_py_logs_log_fetch_fails_shows_placeholder() {
   local check_runs='{"total_count":1,"check_runs":[{"id":111,"name":"CI","status":"completed","conclusion":"failure"}]}'
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;"
   local output
   output=$(run_python logs --pr 42 2>&1)
@@ -282,6 +290,7 @@ test_py_logs_exits_zero() {
   win_log_file=$(mock_path "$_MOCK_DIR/log_111.txt")
   write_gh_mock "
     *\"pulls/42\"*) echo '$HEAD_SHA' ;;
+    *\"check-runs/111/jobs\"*) echo '{\"total_count\":1,\"jobs\":[{\"id\":111}]}' ;;
     *\"check-runs\"*) echo '$check_runs' ;;
     *\"jobs/111/logs\"*) cat '$win_log_file' ;;"
   assert_exit 0 "logs exits 0 on success" run_python logs --pr 42
@@ -319,8 +328,7 @@ test_py_logs_missing_pr_value() {
   assert_stderr_contains "logs --pr without value gives clear message" "missing value for --pr" $python_cmd "$python_script" logs --pr
 }
 
-# --- Run tests ---
-test_names=(
+test_names+=(
   test_py_logs_failed_check_shows_log
   test_py_logs_all_passing_no_output
   test_py_logs_multiple_failures
@@ -335,11 +343,25 @@ test_names=(
   test_py_logs_missing_pr_value
 )
 
-echo "--- test_python_logs.sh"
-for t in "${test_names[@]}"; do
-  "$t"
-done
+# --- Run tests (only when executed directly, not sourced) ---
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
 
-echo ""
-echo "$pass passed, $fail failed"
-[ "$fail" -eq 0 ]
+  _summary_on_exit() {
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ "${fail:-0}" -gt 0 ]; then
+      echo "FAILED: exit ${rc}, ${fail:-0} test(s) failed, ${pass:-0} passed" >&2
+    fi
+    exit "$rc"
+  }
+  trap _summary_on_exit EXIT
+
+  echo "--- test_python_logs.sh"
+  for t in "${test_names[@]}"; do
+    "$t"
+  done
+
+  echo ""
+  echo "$pass passed, $fail failed" >&2
+  [ "$fail" -eq 0 ]
+fi

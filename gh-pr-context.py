@@ -88,6 +88,69 @@ def gh_api_jq(endpoint, jq_filter):
     return result.stdout.strip().replace("\r", ""), True
 
 
+def _setup_git_env():
+    """Resolve worktree gitdir when git rev-parse --git-dir fails.
+
+    Handles three cases:
+    1. Normal repo: git works, nothing to do.
+    2. Worktree with Windows absolute path (C:/...): convert to /mnt/c/...
+    3. Worktree with relative gitdir: resolve relative to worktree root.
+    """
+    _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+    if rc == 0:
+        return  # git works, nothing to do
+
+    # Walk up to find the worktree root where .git is a file
+    work_tree = os.getcwd()
+    while work_tree != os.path.dirname(work_tree):
+        git_file = os.path.join(work_tree, ".git")
+        if os.path.isfile(git_file):
+            break
+        work_tree = os.path.dirname(work_tree)
+    else:
+        return  # no .git file found
+
+    git_file = os.path.join(work_tree, ".git")
+    try:
+        with open(git_file, "r") as f:
+            content = f.read().strip()
+    except OSError:
+        return
+
+    # Parse "gitdir: <path>"
+    m = re.match(r"^gitdir:\s+(.+)$", content)
+    if not m:
+        return
+    gitdir_path = m.group(1).strip()
+
+    # Case 1: Windows absolute path (C:/...) → WSL /mnt/c/...
+    win_match = re.match(r"^([A-Za-z]):(/.*)$", gitdir_path)
+    if win_match:
+        drive = win_match.group(1).lower()
+        rest = win_match.group(2)
+        resolved = f"/mnt/{drive}{rest}"
+        if os.path.isdir(resolved):
+            os.environ["GIT_DIR"] = resolved
+            os.environ["GIT_WORK_TREE"] = work_tree
+            _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            if rc == 0:
+                return
+            os.environ.pop("GIT_DIR", None)
+            os.environ.pop("GIT_WORK_TREE", None)
+
+    # Case 2: Non-absolute path → resolve relative to worktree root
+    if not os.path.isabs(gitdir_path):
+        abs_path = os.path.normpath(os.path.join(work_tree, gitdir_path))
+        if os.path.isdir(abs_path):
+            os.environ["GIT_DIR"] = abs_path
+            os.environ["GIT_WORK_TREE"] = work_tree
+            _out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
+            if rc == 0:
+                return
+            os.environ.pop("GIT_DIR", None)
+            os.environ.pop("GIT_WORK_TREE", None)
+
+
 def check_deps():
     from shutil import which
     git_bin = _git_cmd()[0]
@@ -95,9 +158,10 @@ def check_deps():
     for label, binary in (("git", git_bin), ("gh", gh_bin)):
         if not which(binary):
             die(f"{label} is required but not found on PATH")
+    _setup_git_env()
     out, rc = run_cmd(_git_cmd() + ["rev-parse", "--git-dir"])
     if rc != 0:
-        die("not a git repository")
+        die("not a git repository (or worktree path could not be resolved)")
 
 
 def resolve_owner_repo():
@@ -108,17 +172,56 @@ def resolve_owner_repo():
     return m.group(1)
 
 
+_resolved_owner_repo = None
+
+
 def resolve_pr_number():
+    global _resolved_owner_repo
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
-    owner, repo = owner_repo.split("/", 1)
-    endpoint = f"repos/{owner}/{repo}/pulls?head={owner}:{branch}"
+    head_owner, _ = owner_repo.split("/", 1)
+
+    # On forks, PRs live on the upstream (parent) repo. Detect fork and
+    # use parent for endpoint path + fork owner for head= filter.
+    endpoint_owner_repo = _detect_fork_parent(owner_repo)
+
+    endpoint_owner, endpoint_repo = endpoint_owner_repo.split("/", 1)
+    endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
     val, ok = gh_api_jq(endpoint, ".[0].number")
     if not ok:
         die(f"failed to look up PR for branch '{branch}'")
     if not val or val == "null":
         die(f"no open PR found for branch '{branch}'")
     return val
+
+
+def _detect_fork_parent(owner_repo):
+    """Detect if owner_repo is a fork and return the parent repo, or the
+    original if not a fork. Caches the result in _resolved_owner_repo."""
+    global _resolved_owner_repo
+    try:
+        is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
+        if ok and is_fork_val == "true":
+            parent_val, pok = gh_api_jq(f"repos/{owner_repo}", ".parent.full_name")
+            if pok and parent_val and parent_val != "null":
+                _resolved_owner_repo = parent_val
+                return parent_val
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"warning: fork detection failed for {owner_repo}: {exc}", file=sys.stderr)
+    _resolved_owner_repo = owner_repo
+    return owner_repo
+
+
+def get_owner_repo():
+    """Return the resolved owner/repo for API endpoints.
+
+    After resolve_pr_number sets _resolved_owner_repo (e.g. to the parent
+    repo on forks), this returns that value. Otherwise detects fork and
+    caches the parent repo. Falls back to origin if not a fork.
+    """
+    if _resolved_owner_repo is not None:
+        return _resolved_owner_repo
+    return _detect_fork_parent(resolve_owner_repo())
 
 
 def validate_since_format(value):
@@ -202,7 +305,7 @@ def resolve_since_timestamp(since_input):
 
 
 def resolve_pr_head_sha(pr_number):
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
     val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
     if not ok or not val:
         return None
@@ -232,7 +335,7 @@ def cmd_status(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     sha = resolve_pr_head_sha(pr_number)
     if not sha:
@@ -290,7 +393,7 @@ def cmd_logs(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     sha = resolve_pr_head_sha(pr_number)
     if not sha:
@@ -316,16 +419,34 @@ def cmd_logs(argv):
         return
 
     for run in failed:
-        job_id = run["id"]
+        check_run_id = run["id"]
         name = run["name"]
-        log_content = ""
+
+        # Resolve real job IDs from the check-run (check-run IDs ≠ job IDs)
+        job_ids = []
         try:
-            args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
-            result = subprocess.run(args, capture_output=True, text=True)
-            if result.returncode == 0:
-                log_content = result.stdout
+            jobs_args = _gh_cmd() + ["api", f"repos/{owner_repo}/check-runs/{check_run_id}/jobs"]
+            jobs_result = subprocess.run(jobs_args, capture_output=True, text=True)
+            if jobs_result.returncode == 0:
+                jobs_data = json.loads(jobs_result.stdout)
+                for job in jobs_data.get("jobs", []):
+                    if "id" in job:
+                        job_ids.append(job["id"])
         except Exception:
             pass
+
+        log_content = ""
+        for job_id in job_ids:
+            try:
+                args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
+                result = subprocess.run(args, capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout:
+                    if log_content:
+                        log_content += "\n" + result.stdout
+                    else:
+                        log_content = result.stdout
+            except Exception:
+                pass
 
         print("--- log")
         print(f"name: {name}")
@@ -384,7 +505,7 @@ def cmd_comments(argv):
     if not pr_number:
         pr_number = resolve_pr_number()
 
-    owner_repo = resolve_owner_repo()
+    owner_repo = get_owner_repo()
 
     review_raw, ok = gh_api_paginated(f"repos/{owner_repo}/pulls/{pr_number}/comments")
     if not ok:
@@ -406,33 +527,25 @@ def cmd_comments(argv):
             "body": c.get("body", ""),
         })
 
-    review_ids = [str(item["id"]) for item in review_items]
-
+    # The review comments endpoint already includes replies (they have
+    # in_reply_to_id set). Group replies client-side instead of N+1 API calls.
     replies_map = {}
-    for cid in review_ids:
-        endpoint = f"repos/{owner_repo}/pulls/comments/{cid}/replies"
-        replies_raw, ok = gh_api_paginated(endpoint)
-        if not ok:
-            print(f"warning: failed to fetch replies for comment {cid}", file=sys.stderr)
-            replies_raw = "[]"
-        replies_data = parse_paginated_json(replies_raw)
+    for c in review_data:
+        parent_id = c.get("in_reply_to_id")
+        if parent_id is None:
+            continue
+        if since_ref and c.get("created_at", "") < since_ref:
+            continue
+        parent_key = str(parent_id)
+        replies_map.setdefault(parent_key, []).append({
+            "author": c["user"]["login"],
+            "created": c["created_at"],
+            "body": c.get("body", ""),
+        })
 
-        if since_ref:
-            replies_data = [r for r in replies_data if r.get("created_at", "") >= since_ref]
-
-        reply_fields = sorted(
-            [
-                {
-                    "author": r["user"]["login"],
-                    "created": r["created_at"],
-                    "body": r.get("body", ""),
-                }
-                for r in replies_data
-            ],
-            key=lambda x: x["created"],
-        )
-        if reply_fields:
-            replies_map[cid] = reply_fields
+    # Sort each reply group by created_at
+    for cid in replies_map:
+        replies_map[cid].sort(key=lambda x: x["created"])
 
     for item in review_items:
         cid = str(item["id"])
