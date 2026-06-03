@@ -197,37 +197,6 @@ GHEOF
   chmod +x "$_MOCK_DIR/gh"
 }
 
-write_gh_no_change_mock() {
-  cat > "$_MOCK_DIR/gh" << GHEOF
-#!/usr/bin/env bash
-case "\$*" in
-  *"repos/acme/widgets"*"--jq"*".fork"*) echo 'false'; exit 0 ;;
-  *"pulls/42"*"--jq"*) echo '$HEAD_SHA' ;;
-  *"check-runs"*)
-    echo '{"total_count":1,"check_runs":[{"name":"CI","status":"in_progress","conclusion":null}]}'
-    ;;
-  *) exit 1 ;;
-esac
-GHEOF
-  chmod +x "$_MOCK_DIR/gh"
-}
-
-write_gh_static_mock() {
-  local check_data="$1"
-  cat > "$_MOCK_DIR/gh" << GHEOF
-#!/usr/bin/env bash
-case "\$*" in
-  *"repos/acme/widgets"*"--jq"*".fork"*) echo 'false'; exit 0 ;;
-  *"pulls/42"*"--jq"*) echo '$HEAD_SHA' ;;
-  *"check-runs"*)
-    printf '%s' '$check_data'
-    ;;
-  *) exit 1 ;;
-esac
-GHEOF
-  chmod +x "$_MOCK_DIR/gh"
-}
-
 run_python() {
   if command -v cygpath >/dev/null 2>&1; then
     local git_bash='"C:/Program Files/Git/usr/bin/bash.exe"'
