@@ -977,7 +977,7 @@ def usage_monitor_status():
     print("  --pr <number>       PR number (auto-detected from branch if omitted)")
     print("  --interval <secs>   Poll interval in seconds (default: 30)")
     print("  --timeout <dur>     Maximum time to poll (e.g. 30s, 5m, 1h)")
-    print("  --check <name>      Only watch the named check")
+    print("  --check <name>      Only watch the named check (case-sensitive)")
     print("  -h, --help          Show this message")
 
 

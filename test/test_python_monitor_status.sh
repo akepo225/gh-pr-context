@@ -698,7 +698,7 @@ test_py_monitor_status_duplicate_check_keeps_first() {
   setup_mock_dir
   write_git_mock
   local initial='{"total_count":2,"check_runs":[{"name":"CI","status":"queued","conclusion":null},{"name":"CI","status":"in_progress","conclusion":null}]}'
-  local changed='{"total_count":2,"check_runs":[{"name":"CI","status":"queued","conclusion":null},{"name":"CI","status":"completed","conclusion":"success"}]}'
+  local changed='{"total_count":2,"check_runs":[{"name":"CI","status":"completed","conclusion":"success"},{"name":"CI","status":"queued","conclusion":null}]}'
   write_gh_stateful_mock "$initial" "$changed"
   local output
   output=$(run_python monitor status --pr 42 --interval 1 2>&1)
