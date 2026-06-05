@@ -396,6 +396,7 @@ def _capture_check_snapshot(owner_repo, sha, timeout_secs=None):
 
 
 def _capture_comment_id_snapshot(owner_repo, pr_number, timeout_secs=None):
+    snap_start = time.monotonic()
     review_raw, review_status = _timed_gh_api_paginated(
         f"repos/{owner_repo}/pulls/{pr_number}/comments", timeout_secs
     )
@@ -403,8 +404,11 @@ def _capture_comment_id_snapshot(owner_repo, pr_number, timeout_secs=None):
         return None, "timeout"
     if review_status != "ok":
         return None, "error"
+    remaining = None
+    if timeout_secs is not None:
+        remaining = max(timeout_secs - (time.monotonic() - snap_start), 0)
     issue_raw, issue_status = _timed_gh_api_paginated(
-        f"repos/{owner_repo}/issues/{pr_number}/comments", timeout_secs
+        f"repos/{owner_repo}/issues/{pr_number}/comments", remaining
     )
     if issue_status == "timeout":
         return None, "timeout"
@@ -735,12 +739,6 @@ def cmd_monitor_comments(argv):
 
     owner_repo = get_owner_repo()
 
-    initial_snapshot, snap_status = _capture_comment_id_snapshot(
-        owner_repo, pr_number
-    )
-    if snap_status != "ok":
-        die(f"failed to fetch comments for PR #{pr_number}")
-
     interrupted = False
 
     def _handle_signal(signum, frame):
@@ -750,9 +748,23 @@ def cmd_monitor_comments(argv):
     original_sigint = signal.signal(signal.SIGINT, _handle_signal)
     original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
 
-    start_mono = time.monotonic()
-
     try:
+        start_mono = time.monotonic()
+
+        call_timeout = timeout_secs
+        initial_snapshot, snap_status = _capture_comment_id_snapshot(
+            owner_repo, pr_number, call_timeout
+        )
+        if interrupted:
+            sys.exit(130)
+        if snap_status == "timeout":
+            print(
+                f"monitor timed out after {timeout_input}", file=sys.stderr
+            )
+            sys.exit(2)
+        if snap_status != "ok":
+            die(f"failed to fetch comments for PR #{pr_number}")
+
         while True:
             if timeout_secs is not None:
                 elapsed = time.monotonic() - start_mono
