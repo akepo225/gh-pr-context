@@ -465,6 +465,20 @@ def _monitor_call_timeout(timeout_secs, start_mono):
     return remaining
 
 
+_INTERRUPTIBLE_SLEEP_CHUNK = 0.1
+
+
+def _interruptible_sleep(total, is_interrupted):
+    end = time.monotonic() + total
+    while True:
+        if is_interrupted():
+            return
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, _INTERRUPTIBLE_SLEEP_CHUNK))
+
+
 def cmd_monitor_status(argv):
     pr_number = ""
     interval = 30
@@ -555,7 +569,7 @@ def cmd_monitor_status(argv):
                 if remaining < sleep_for:
                     sleep_for = max(remaining, 0)
             try:
-                time.sleep(sleep_for)
+                _interruptible_sleep(sleep_for, lambda: interrupted)
             except OSError:
                 pass
 
