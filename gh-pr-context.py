@@ -395,6 +395,32 @@ def _capture_check_snapshot(owner_repo, sha, timeout_secs=None):
     return snapshot, "ok"
 
 
+def _capture_comment_id_snapshot(owner_repo, pr_number, timeout_secs=None):
+    review_raw, review_status = _timed_gh_api_paginated(
+        f"repos/{owner_repo}/pulls/{pr_number}/comments", timeout_secs
+    )
+    if review_status == "timeout":
+        return None, "timeout"
+    if review_status != "ok":
+        return None, "error"
+    issue_raw, issue_status = _timed_gh_api_paginated(
+        f"repos/{owner_repo}/issues/{pr_number}/comments", timeout_secs
+    )
+    if issue_status == "timeout":
+        return None, "timeout"
+    if issue_status != "ok":
+        return None, "error"
+    review_data = parse_paginated_json(review_raw)
+    issue_data = parse_paginated_json(issue_raw)
+    ids = set()
+    for c in review_data:
+        if c.get("in_reply_to_id") is None:
+            ids.add(c["id"])
+    for c in issue_data:
+        ids.add(c["id"])
+    return ids, "ok"
+
+
 def _compute_status_diff(prev_snapshot, cur_snapshot):
     prev_by_name = {}
     for c in prev_snapshot:
@@ -656,11 +682,138 @@ def cmd_monitor(argv):
 
     if sub_command == "status":
         cmd_monitor_status(rest)
+    elif sub_command == "comments":
+        cmd_monitor_comments(rest)
     elif sub_command in ("-h", "--help"):
         usage_monitor()
         sys.exit(0)
     else:
         die(f"unknown monitor sub-command: {sub_command}")
+
+
+def cmd_monitor_comments(argv):
+    pr_number = ""
+    interval = 30
+    timeout_input = ""
+    timeout_secs = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--pr":
+            if i + 1 >= len(argv):
+                die("missing value for --pr")
+            pr_number = argv[i + 1]
+            i += 2
+        elif arg == "--interval":
+            if i + 1 >= len(argv):
+                die("missing value for --interval")
+            interval = argv[i + 1]
+            i += 2
+            if not re.match(r"^[1-9][0-9]*$", interval):
+                die(
+                    f"invalid --interval value: {interval} (expected a positive integer)"
+                )
+            interval = int(interval)
+        elif arg == "--timeout":
+            if i + 1 >= len(argv):
+                die("missing value for --timeout")
+            timeout_input = argv[i + 1]
+            i += 2
+            timeout_secs = parse_duration(timeout_input)
+        elif arg == "--check":
+            die("unknown option: --check (only valid with monitor status)")
+        elif arg in ("-h", "--help"):
+            usage_monitor_comments()
+            sys.exit(0)
+        else:
+            die(f"unknown option: {arg}")
+
+    check_deps()
+
+    if not pr_number:
+        pr_number = resolve_pr_number()
+
+    owner_repo = get_owner_repo()
+
+    initial_snapshot, snap_status = _capture_comment_id_snapshot(
+        owner_repo, pr_number
+    )
+    if snap_status != "ok":
+        die(f"failed to fetch comments for PR #{pr_number}")
+
+    interrupted = False
+
+    def _handle_signal(signum, frame):
+        nonlocal interrupted
+        interrupted = True
+
+    original_sigint = signal.signal(signal.SIGINT, _handle_signal)
+    original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+
+    start_mono = time.monotonic()
+
+    try:
+        while True:
+            if timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            sleep_for = interval
+            if timeout_secs is not None:
+                remaining = timeout_secs - (time.monotonic() - start_mono)
+                if remaining < sleep_for:
+                    sleep_for = max(remaining, 0)
+            try:
+                _interruptible_sleep(sleep_for, lambda: interrupted)
+            except OSError:
+                pass
+
+            if interrupted:
+                pass
+            elif timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_snapshot, snap_status = _capture_comment_id_snapshot(
+                owner_repo, pr_number, call_timeout
+            )
+            if snap_status == "timeout":
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+            if snap_status != "ok":
+                die("failed to fetch comments during poll")
+
+            new_ids = cur_snapshot - initial_snapshot
+            if new_ids:
+                print("--- change")
+                print("type: new-comment")
+                print(f"count: {len(new_ids)}")
+                if interrupted:
+                    sys.exit(130)
+                sys.exit(0)
+
+            if interrupted:
+                sys.exit(130)
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
 
 
 def cmd_status(argv):
@@ -975,7 +1128,8 @@ def usage_monitor():
     print("usage: gh-pr-context monitor <sub-command> [options]")
     print("")
     print("sub-commands:")
-    print("  status   Poll for check status changes")
+    print("  status    Poll for check status changes")
+    print("  comments  Poll for new comments")
     print("")
     print("options:")
     print("  -h, --help   Show this message")
@@ -992,6 +1146,19 @@ def usage_monitor_status():
     print("  --interval <secs>   Poll interval in seconds (default: 30)")
     print("  --timeout <dur>     Maximum time to poll (e.g. 30s, 5m, 1h)")
     print("  --check <name>      Only watch the named check (case-sensitive)")
+    print("  -h, --help          Show this message")
+
+
+def usage_monitor_comments():
+    print("usage: gh-pr-context monitor comments [options]")
+    print("")
+    print("Poll for new top-level review and issue comments.")
+    print("Exits 0 on change, 1 on error, 2 on timeout, 130 on signal.")
+    print("")
+    print("options:")
+    print("  --pr <number>       PR number (auto-detected from branch if omitted)")
+    print("  --interval <secs>   Poll interval in seconds (default: 30)")
+    print("  --timeout <dur>     Maximum time to poll (e.g. 30s, 5m, 1h)")
     print("  -h, --help          Show this message")
 
 
