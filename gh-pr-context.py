@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 VERSION = "0.2.5"
 
+_active_subprocess = None
+
 
 def die(message):
     print(f"error: {message}", file=sys.stderr)
@@ -356,16 +358,23 @@ def parse_duration(input_str):
 
 
 def _timed_gh_api_paginated(endpoint, timeout_secs=None):
+    global _active_subprocess
     args = _gh_cmd() + ["api", "--paginate", endpoint]
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    _active_subprocess = proc
     try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout_secs
-        )
+        stdout, _ = proc.communicate(timeout=timeout_secs)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         return None, "timeout"
-    if result.returncode != 0:
+    finally:
+        _active_subprocess = None
+    if proc.returncode != 0:
         return None, "error"
-    return result.stdout, "ok"
+    return stdout, "ok"
 
 
 def _capture_check_snapshot(owner_repo, sha, timeout_secs=None):
@@ -744,6 +753,8 @@ def cmd_monitor_comments(argv):
     def _handle_signal(signum, frame):
         nonlocal interrupted
         interrupted = True
+        if _active_subprocess is not None:
+            _active_subprocess.kill()
 
     original_sigint = signal.signal(signal.SIGINT, _handle_signal)
     original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
