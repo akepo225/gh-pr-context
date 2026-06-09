@@ -95,18 +95,27 @@ def gh_api_jq(endpoint, jq_filter):
 def _timed_gh_api_jq(endpoint, jq_filter, timeout_secs=None):
     """Like gh_api_jq but with a subprocess timeout.
 
-    Returns (value, status) where status is "ok", "timeout", or "error".
+    Uses Popen + _active_subprocess so the monitor signal handler can
+    kill the in-flight gh process.  Returns (value, status) where
+    status is "ok", "timeout", or "error".
     """
+    global _active_subprocess
     args = _gh_cmd() + ["api", endpoint, "--jq", jq_filter]
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    _active_subprocess = proc
     try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout_secs
-        )
+        stdout, _ = proc.communicate(timeout=timeout_secs)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         return None, "timeout"
-    if result.returncode != 0:
+    finally:
+        _active_subprocess = None
+    if proc.returncode != 0:
         return None, "error"
-    return result.stdout.strip().replace("\r", ""), "ok"
+    return stdout.strip().replace("\r", ""), "ok"
 
 
 def _setup_git_env():
@@ -975,6 +984,8 @@ def cmd_monitor_all(argv):
             print(f"monitor timed out after {timeout_input}", file=sys.stderr)
             sys.exit(2)
         if sha_status != "ok":
+            if interrupted:
+                sys.exit(130)
             die(f"failed to resolve head SHA for PR #{pr_number}")
 
         call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
@@ -987,6 +998,8 @@ def cmd_monitor_all(argv):
             print(f"monitor timed out after {timeout_input}", file=sys.stderr)
             sys.exit(2)
         if snap_status != "ok":
+            if interrupted:
+                sys.exit(130)
             die(f"failed to fetch check runs for commit {prev_sha}")
 
         call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
@@ -1001,6 +1014,8 @@ def cmd_monitor_all(argv):
             print(f"monitor timed out after {timeout_input}", file=sys.stderr)
             sys.exit(2)
         if snap_status != "ok":
+            if interrupted:
+                sys.exit(130)
             die(f"failed to fetch comments for PR #{pr_number}")
 
         while True:
