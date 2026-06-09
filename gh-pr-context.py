@@ -196,30 +196,63 @@ def resolve_owner_repo():
 _resolved_owner_repo = None
 
 
-def resolve_pr_number():
+def resolve_pr_number(call_timeout=None):
     global _resolved_owner_repo
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
     head_owner, _ = owner_repo.split("/", 1)
 
-    # On forks, PRs live on the upstream (parent) repo. Detect fork and
-    # use parent for endpoint path + fork owner for head= filter.
-    endpoint_owner_repo = _detect_fork_parent(owner_repo)
+    if call_timeout is not None:
+        endpoint_owner_repo, det_status = _detect_fork_parent(owner_repo, call_timeout)
+        if det_status == "timeout":
+            return None, "timeout"
+    else:
+        endpoint_owner_repo = _detect_fork_parent(owner_repo)
 
     endpoint_owner, endpoint_repo = endpoint_owner_repo.split("/", 1)
     endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
-    val, ok = gh_api_jq(endpoint, ".[0].number")
-    if not ok:
-        die(f"failed to look up PR for branch '{branch}'")
+
+    if call_timeout is not None:
+        val, status = _timed_gh_api_jq(endpoint, ".[0].number", call_timeout)
+        if status == "timeout":
+            return None, "timeout"
+        if status != "ok":
+            return None, "error"
+    else:
+        val, ok = gh_api_jq(endpoint, ".[0].number")
+        if not ok:
+            die(f"failed to look up PR for branch '{branch}'")
     if not val or val == "null":
+        if call_timeout is not None:
+            return None, "error"
         die(f"no open PR found for branch '{branch}'")
+    if call_timeout is not None:
+        return val, "ok"
     return val
 
 
-def _detect_fork_parent(owner_repo):
+def _detect_fork_parent(owner_repo, call_timeout=None):
     """Detect if owner_repo is a fork and return the parent repo, or the
-    original if not a fork. Caches the result in _resolved_owner_repo."""
+    original if not a fork. Caches the result in _resolved_owner_repo.
+
+    When call_timeout is provided, uses _timed_gh_api_jq and returns
+    (result, status) where status is "ok" or "timeout".
+    When call_timeout is None, returns a plain string (backward compat).
+    """
     global _resolved_owner_repo
+    if call_timeout is not None:
+        is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", call_timeout)
+        if status == "timeout":
+            return owner_repo, "timeout"
+        if status == "ok" and is_fork_val == "true":
+            parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", call_timeout)
+            if pstatus == "timeout":
+                return owner_repo, "timeout"
+            if pstatus == "ok" and parent_val and parent_val != "null":
+                _resolved_owner_repo = parent_val
+                return parent_val, "ok"
+        _resolved_owner_repo = owner_repo
+        return owner_repo, "ok"
     try:
         is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
         if ok and is_fork_val == "true":
@@ -233,16 +266,24 @@ def _detect_fork_parent(owner_repo):
     return owner_repo
 
 
-def get_owner_repo():
+def get_owner_repo(call_timeout=None):
     """Return the resolved owner/repo for API endpoints.
 
     After resolve_pr_number sets _resolved_owner_repo (e.g. to the parent
     repo on forks), this returns that value. Otherwise detects fork and
     caches the parent repo. Falls back to origin if not a fork.
+
+    When call_timeout is provided, returns (result, status) where status
+    is "ok" or "timeout". Otherwise returns a plain string.
     """
     if _resolved_owner_repo is not None:
+        if call_timeout is not None:
+            return _resolved_owner_repo, "ok"
         return _resolved_owner_repo
-    return _detect_fork_parent(resolve_owner_repo())
+    result = _detect_fork_parent(resolve_owner_repo(), call_timeout)
+    if call_timeout is not None:
+        return result
+    return result
 
 
 def validate_since_format(value):
@@ -882,11 +923,6 @@ def cmd_monitor_all(argv):
 
     check_deps()
 
-    if not pr_number:
-        pr_number = resolve_pr_number()
-
-    owner_repo = get_owner_repo()
-
     interrupted = False
 
     def _handle_signal(signum, frame):
@@ -899,6 +935,34 @@ def cmd_monitor_all(argv):
     original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
 
     start_mono = time.monotonic()
+
+    if not pr_number:
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        pr_number_result = resolve_pr_number(call_timeout)
+        if call_timeout is not None:
+            pr_number, pr_status = pr_number_result
+            if pr_status == "timeout":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+            if pr_status != "ok":
+                die("failed to resolve PR number")
+        else:
+            pr_number = pr_number_result
+
+    call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+    if call_timeout == "expired":
+        print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+        sys.exit(2)
+    if call_timeout is not None:
+        owner_repo, repo_status = get_owner_repo(call_timeout)
+        if repo_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        owner_repo = get_owner_repo()
 
     try:
         call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
