@@ -887,20 +887,6 @@ def cmd_monitor_all(argv):
 
     owner_repo = get_owner_repo()
 
-    prev_sha, sha_status = resolve_pr_head_sha(pr_number)
-    if sha_status != "ok":
-        die(f"failed to resolve head SHA for PR #{pr_number}")
-
-    prev_status_snapshot, snap_status = _capture_check_snapshot(owner_repo, prev_sha)
-    if snap_status != "ok":
-        die(f"failed to fetch check runs for commit {prev_sha}")
-
-    initial_comment_snapshot, snap_status = _capture_comment_id_snapshot(
-        owner_repo, pr_number
-    )
-    if snap_status != "ok":
-        die(f"failed to fetch comments for PR #{pr_number}")
-
     interrupted = False
 
     def _handle_signal(signum, frame):
@@ -915,6 +901,44 @@ def cmd_monitor_all(argv):
     start_mono = time.monotonic()
 
     try:
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        prev_sha, sha_status = resolve_pr_head_sha(pr_number, call_timeout)
+        if sha_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if sha_status != "ok":
+            die(f"failed to resolve head SHA for PR #{pr_number}")
+
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        prev_status_snapshot, snap_status = _capture_check_snapshot(owner_repo, prev_sha, call_timeout)
+        if snap_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if snap_status != "ok":
+            die(f"failed to fetch check runs for commit {prev_sha}")
+
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        initial_comment_snapshot, snap_status = _capture_comment_id_snapshot(
+            owner_repo, pr_number, call_timeout
+        )
+        if snap_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if snap_status != "ok":
+            die(f"failed to fetch comments for PR #{pr_number}")
+
         while True:
             if timeout_secs is not None:
                 elapsed = time.monotonic() - start_mono
