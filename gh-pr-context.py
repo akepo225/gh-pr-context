@@ -971,6 +971,10 @@ def cmd_monitor_all(argv):
         if repo_status == "timeout":
             print(f"monitor timed out after {timeout_input}", file=sys.stderr)
             sys.exit(2)
+        if repo_status != "ok":
+            if interrupted:
+                sys.exit(130)
+            die("failed to resolve owner/repo")
     else:
         owner_repo = get_owner_repo()
 
