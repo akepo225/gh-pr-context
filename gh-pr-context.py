@@ -821,6 +821,8 @@ def cmd_monitor_comments(argv):
                     sys.exit(130)
                 continue
             if snap_status != "ok":
+                if interrupted:
+                    sys.exit(130)
                 die("failed to fetch comments during poll")
 
             new_ids = cur_snapshot - initial_snapshot
