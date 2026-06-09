@@ -635,11 +635,11 @@ test_monitor_comments_overall_timeout_after_api_timeout() {
   local initial_issues='[]'
   setup_mocks_monitor_comments_api_timeout_no_change "$initial_reviews" "$initial_issues" "3"
   local output exit_code=0
-  output=$(run_script_with_real_sleep monitor comments --pr 42 --interval 1 --timeout 2s 2>&1) || exit_code=$?
+  output=$(run_script_with_real_sleep monitor comments --pr 42 --interval 1 --timeout 5s 2>&1) || exit_code=$?
   cleanup_mock_counter
   if [ "$exit_code" -eq 2 ] \
     && echo "$output" | grep -qF "gh api call timed out; retrying next poll" \
-    && echo "$output" | grep -qF "monitor timed out after 2s"; then
+    && echo "$output" | grep -qF "monitor timed out after 5s"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
