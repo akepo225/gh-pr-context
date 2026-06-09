@@ -1062,6 +1062,8 @@ def cmd_monitor_all(argv):
                     sys.exit(130)
                 continue
             if sha_status != "ok":
+                if interrupted:
+                    sys.exit(130)
                 die(f"failed to re-resolve head SHA for PR #{pr_number}")
 
             if cur_sha != prev_sha:
@@ -1088,6 +1090,8 @@ def cmd_monitor_all(argv):
                     sys.exit(130)
                 continue
             if snap_status != "ok":
+                if interrupted:
+                    sys.exit(130)
                 die("failed to fetch check runs during poll")
 
             call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
@@ -1106,6 +1110,8 @@ def cmd_monitor_all(argv):
                     sys.exit(130)
                 continue
             if snap_status != "ok":
+                if interrupted:
+                    sys.exit(130)
                 die("failed to fetch comments during poll")
 
             status_changes = _compute_status_diff(
