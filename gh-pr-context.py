@@ -253,11 +253,15 @@ def _detect_fork_parent(owner_repo, call_timeout=None):
         is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", call_timeout)
         if status == "timeout":
             return owner_repo, "timeout"
-        if status == "ok" and is_fork_val == "true":
+        if status == "error":
+            return owner_repo, "error"
+        if is_fork_val == "true":
             parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", call_timeout)
             if pstatus == "timeout":
                 return owner_repo, "timeout"
-            if pstatus == "ok" and parent_val and parent_val != "null":
+            if pstatus == "error":
+                return owner_repo, "error"
+            if parent_val and parent_val != "null":
                 _resolved_owner_repo = parent_val
                 return parent_val, "ok"
         _resolved_owner_repo = owner_repo
@@ -377,17 +381,12 @@ def resolve_since_timestamp(since_input):
 
 def resolve_pr_head_sha(pr_number, timeout_secs=None):
     owner_repo = get_owner_repo()
-    if timeout_secs is not None:
-        val, status = _timed_gh_api_jq(
-            f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha", timeout_secs
-        )
-        if status == "timeout":
-            return None, "timeout"
-        if status == "error" or not val:
-            return None, "error"
-        return val, "ok"
-    val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
-    if not ok or not val:
+    val, status = _timed_gh_api_jq(
+        f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha", timeout_secs
+    )
+    if status == "timeout":
+        return None, "timeout"
+    if status == "error" or not val:
         return None, "error"
     return val, "ok"
 
@@ -957,6 +956,8 @@ def cmd_monitor_all(argv):
                 print(f"monitor timed out after {timeout_input}", file=sys.stderr)
                 sys.exit(2)
             if pr_status != "ok":
+                if interrupted:
+                    sys.exit(130)
                 die("failed to resolve PR number")
         else:
             pr_number = pr_number_result
