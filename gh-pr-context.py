@@ -250,13 +250,17 @@ def _detect_fork_parent(owner_repo, call_timeout=None):
     """
     global _resolved_owner_repo
     if call_timeout is not None:
+        before_fork = time.monotonic()
         is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", call_timeout)
         if status == "timeout":
             return owner_repo, "timeout"
         if status == "error":
             return owner_repo, "error"
         if is_fork_val == "true":
-            parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", call_timeout)
+            remaining = call_timeout - (time.monotonic() - before_fork)
+            if remaining <= 0:
+                return owner_repo, "timeout"
+            parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", remaining)
             if pstatus == "timeout":
                 return owner_repo, "timeout"
             if pstatus == "error":
