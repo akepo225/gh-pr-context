@@ -212,8 +212,14 @@ def resolve_pr_number(call_timeout=None):
     head_owner, _ = owner_repo.split("/", 1)
 
     if call_timeout is not None:
+        pre_detect_mono = time.monotonic()
         endpoint_owner_repo, det_status = _detect_fork_parent(owner_repo, call_timeout)
         if det_status == "timeout":
+            return None, "timeout"
+        if det_status != "ok":
+            return None, "error"
+        remaining = call_timeout - (time.monotonic() - pre_detect_mono)
+        if remaining <= 0:
             return None, "timeout"
     else:
         endpoint_owner_repo = _detect_fork_parent(owner_repo)
@@ -222,7 +228,7 @@ def resolve_pr_number(call_timeout=None):
     endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
 
     if call_timeout is not None:
-        val, status = _timed_gh_api_jq(endpoint, ".[0].number", call_timeout)
+        val, status = _timed_gh_api_jq(endpoint, ".[0].number", remaining)
         if status == "timeout":
             return None, "timeout"
         if status != "ok":
