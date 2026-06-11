@@ -276,15 +276,12 @@ def _detect_fork_parent(owner_repo, call_timeout=None):
                 return parent_val, "ok"
         _resolved_owner_repo = owner_repo
         return owner_repo, "ok"
-    try:
-        is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
-        if ok and is_fork_val == "true":
-            parent_val, pok = gh_api_jq(f"repos/{owner_repo}", ".parent.full_name")
-            if pok and parent_val and parent_val != "null":
-                _resolved_owner_repo = parent_val
-                return parent_val
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f"warning: fork detection failed for {owner_repo}: {exc}", file=sys.stderr)
+    is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", None)
+    if status == "ok" and is_fork_val == "true":
+        parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", None)
+        if pstatus == "ok" and parent_val and parent_val != "null":
+            _resolved_owner_repo = parent_val
+            return parent_val
     _resolved_owner_repo = owner_repo
     return owner_repo
 
@@ -976,8 +973,9 @@ def cmd_monitor_all(argv):
     if call_timeout == "expired":
         print(f"monitor timed out after {timeout_input}", file=sys.stderr)
         sys.exit(2)
+    owner_repo_result = get_owner_repo(call_timeout)
     if call_timeout is not None:
-        owner_repo, repo_status = get_owner_repo(call_timeout)
+        owner_repo, repo_status = owner_repo_result
         if repo_status == "timeout":
             print(f"monitor timed out after {timeout_input}", file=sys.stderr)
             sys.exit(2)
@@ -986,7 +984,7 @@ def cmd_monitor_all(argv):
                 sys.exit(130)
             die("failed to resolve owner/repo")
     else:
-        owner_repo = get_owner_repo()
+        owner_repo = owner_repo_result
 
     try:
         call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
