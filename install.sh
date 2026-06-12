@@ -36,7 +36,7 @@ download() {
 }
 
 _is_windows() {
-  [[ "$(uname -s 2>/dev/null)" == MINGW* || "$(uname -s 2>/dev/null)" == MSYS* || "$(uname -s 2>/dev/null)" == CYGWIN* ]] || command -v cmd.exe >/dev/null 2>&1
+  [[ "$(uname -s 2>/dev/null)" == MINGW* || "$(uname -s 2>/dev/null)" == MSYS* || "$(uname -s 2>/dev/null)" == CYGWIN* ]]
 }
 ON_WINDOWS=""
 is_windows() {
@@ -46,14 +46,42 @@ is_windows() {
   [ "$ON_WINDOWS" = "1" ]
 }
 
+_find_python_cmd() {
+  if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+    echo "python"
+  elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+    echo "python3"
+  elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then
+    echo "py -3"
+  else
+    echo ""
+  fi
+}
+
+_windows_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1" 2>/dev/null || echo "$1"
+  else
+    local p="$1"
+    if [[ "$p" =~ ^/([a-zA-Z])/ ]]; then
+      p="${p/#\/${BASH_REMATCH[1]}\//${BASH_REMATCH[1],,}:/}"
+    fi
+    echo "$p"
+  fi
+}
+
 download "$SCRIPT_NAME" "$install_dir/$SCRIPT_NAME"
 echo "installed $SCRIPT_NAME to $install_dir/$SCRIPT_NAME"
 
 if is_windows; then
   download "${SCRIPT_NAME}.py" "$install_dir/${SCRIPT_NAME}.py"
-  cat > "$install_dir/${SCRIPT_NAME}.cmd" << 'CMDEOF'
+  local_python=$(_find_python_cmd)
+  if [ -z "$local_python" ]; then
+    echo "warning: python not found; ${SCRIPT_NAME}.cmd will not work until Python is installed" >&2
+  fi
+  cat > "$install_dir/${SCRIPT_NAME}.cmd" << CMDEOF
 @echo off
-python "%~dp0gh-pr-context.py" %*
+${local_python:-python} "%~dp0gh-pr-context.py" %*
 CMDEOF
   echo "installed ${SCRIPT_NAME}.cmd to $install_dir/${SCRIPT_NAME}.cmd"
 fi
@@ -63,7 +91,7 @@ if [ -z "$resolved" ]; then
   echo "warning: $SCRIPT_NAME is not on your PATH" >&2
   echo "  Add it by running:" >&2
   if is_windows; then
-    echo "    \$env:PATH = \"$install_dir;\" + \$env:PATH" >&2
+    echo "    \$env:PATH = \"$(_windows_path "$install_dir");\" + \$env:PATH" >&2
   else
     echo "    export PATH=\"$install_dir:\$PATH\"" >&2
   fi
