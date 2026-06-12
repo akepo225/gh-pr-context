@@ -32,7 +32,11 @@ download() {
   curl -fsSL "$RAW_BASE/$src" -o "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; die "failed to download $src"; }
   mv "$tmp" "$dest" 2>/dev/null || { rm -f "$tmp"; die "failed to write to $dest"; }
   _tmpfiles=("${_tmpfiles[@]//$tmp}")
-  chmod +x "$dest" 2>/dev/null || true
+  if ! is_windows; then
+    chmod +x "$dest" 2>/dev/null || die "failed to set executable bit on $dest"
+  else
+    chmod +x "$dest" 2>/dev/null || true
+  fi
 }
 
 _is_windows() {
@@ -46,12 +50,20 @@ is_windows() {
   [ "$ON_WINDOWS" = "1" ]
 }
 
+_python_version_ok() {
+  local cmd="$1"
+  shift
+  local ver
+  ver=$("$cmd" "$@" -c "import sys; print(sys.version_info >= (3, 11))" 2>/dev/null) || return 1
+  [ "$ver" = "True" ]
+}
+
 _find_python_cmd() {
-  if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  if command -v python >/dev/null 2>&1 && _python_version_ok python; then
     echo "python"
-  elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  elif command -v python3 >/dev/null 2>&1 && _python_version_ok python3; then
     echo "python3"
-  elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then
+  elif command -v py >/dev/null 2>&1 && _python_version_ok py -3; then
     echo "py -3"
   else
     echo ""
@@ -77,11 +89,11 @@ if is_windows; then
   download "${SCRIPT_NAME}.py" "$install_dir/${SCRIPT_NAME}.py"
   local_python=$(_find_python_cmd)
   if [ -z "$local_python" ]; then
-    echo "warning: python not found; ${SCRIPT_NAME}.cmd will not work until Python is installed" >&2
+    die "no Python 3.11+ found (tried python, python3, py -3); install Python first"
   fi
   cat > "$install_dir/${SCRIPT_NAME}.cmd" << CMDEOF
 @echo off
-${local_python:-python} "%~dp0gh-pr-context.py" %*
+${local_python} "%~dp0gh-pr-context.py" %*
 CMDEOF
   echo "installed ${SCRIPT_NAME}.cmd to $install_dir/${SCRIPT_NAME}.cmd"
 fi
