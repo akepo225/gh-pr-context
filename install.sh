@@ -40,7 +40,9 @@ download() {
 }
 
 _is_windows() {
-  [[ "$(uname -s 2>/dev/null)" == MINGW* || "$(uname -s 2>/dev/null)" == MSYS* || "$(uname -s 2>/dev/null)" == CYGWIN* ]]
+  local osname
+  osname="$(uname -s 2>/dev/null)"
+  [[ "$osname" == MINGW* || "$osname" == MSYS* || "$osname" == CYGWIN* ]]
 }
 ON_WINDOWS=""
 is_windows() {
@@ -59,14 +61,24 @@ _python_version_ok() {
 }
 
 _find_python_cmd() {
-  if command -v python >/dev/null 2>&1 && _python_version_ok python; then
-    echo "python"
-  elif command -v python3 >/dev/null 2>&1 && _python_version_ok python3; then
-    echo "python3"
-  elif command -v py >/dev/null 2>&1 && _python_version_ok py -3; then
-    echo "py -3"
+  if is_windows; then
+    if command -v py >/dev/null 2>&1 && _python_version_ok py -3; then
+      echo "py -3"
+    elif command -v python >/dev/null 2>&1 && _python_version_ok python; then
+      echo "python"
+    elif command -v python3 >/dev/null 2>&1 && _python_version_ok python3; then
+      echo "python3"
+    else
+      echo ""
+    fi
   else
-    echo ""
+    if command -v python3 >/dev/null 2>&1 && _python_version_ok python3; then
+      echo "python3"
+    elif command -v python >/dev/null 2>&1 && _python_version_ok python; then
+      echo "python"
+    else
+      echo ""
+    fi
   fi
 }
 
@@ -99,12 +111,14 @@ CMDEOF
 fi
 
 resolved=$(command -v "$SCRIPT_NAME" 2>/dev/null) || true
-if [ -z "$resolved" ]; then
+if is_windows; then
+  if [ -z "$resolved" ]; then
+    echo "warning: $SCRIPT_NAME is not on your PATH" >&2
+  fi
+  echo "  Add it to PowerShell PATH by running:" >&2
+  echo "    \$env:PATH = \"$(_windows_path "$install_dir");\" + \$env:PATH" >&2
+elif [ -z "$resolved" ]; then
   echo "warning: $SCRIPT_NAME is not on your PATH" >&2
   echo "  Add it by running:" >&2
-  if is_windows; then
-    echo "    \$env:PATH = \"$(_windows_path "$install_dir");\" + \$env:PATH" >&2
-  else
-    echo "    export PATH=\"$install_dir:\$PATH\"" >&2
-  fi
+  echo "    export PATH=\"$install_dir:\$PATH\"" >&2
 fi
