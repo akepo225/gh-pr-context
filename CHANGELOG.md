@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.0
+
+- **Windows native PowerShell support** — `gh-pr-context` now works on Windows without WSL or Git Bash. The Python runtime (`gh-pr-context.py`) is invoked automatically when running under native PowerShell/cmd, with full feature parity including all monitor sub-commands.
+
 ## v0.2.6
 
 - **monitor --all (Python)** — New sub-command in Python runtime to poll for both CI check status changes and new PR comments in a single loop; output parity with the existing bash implementation.

@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "0.2.6"
+VERSION = "0.3.0"
 
 _active_subprocess = None
 
