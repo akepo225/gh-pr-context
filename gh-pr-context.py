@@ -35,7 +35,8 @@ def _gh_cmd():
 
 def run_cmd(args, timeout=None):
     result = subprocess.run(
-        args, capture_output=True, text=True, timeout=timeout
+        args, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=timeout
     )
     return result.stdout.strip(), result.returncode
 
@@ -78,7 +79,7 @@ def parse_paginated_json(raw):
 
 def gh_api_paginated(endpoint):
     args = _gh_cmd() + ["api", "--paginate", endpoint]
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         return None, False
     return result.stdout, True
@@ -86,7 +87,7 @@ def gh_api_paginated(endpoint):
 
 def gh_api_jq(endpoint, jq_filter):
     args = _gh_cmd() + ["api", endpoint, "--jq", jq_filter]
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         return None, False
     return result.stdout.strip().replace("\r", ""), True
@@ -100,7 +101,8 @@ def _timed_gh_api_jq(endpoint, jq_filter, timeout_secs=None):
     args = _gh_cmd() + ["api", endpoint, "--jq", jq_filter]
     try:
         result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout_secs
+            args, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout_secs
         )
     except subprocess.TimeoutExpired:
         return None, "timeout"
@@ -361,7 +363,8 @@ def _timed_gh_api_paginated(endpoint, timeout_secs=None):
     global _active_subprocess
     args = _gh_cmd() + ["api", "--paginate", endpoint]
     proc = subprocess.Popen(
-        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8", errors="replace"
     )
     _active_subprocess = proc
     try:
@@ -955,7 +958,7 @@ def cmd_logs(argv):
         job_ids = []
         try:
             jobs_args = _gh_cmd() + ["api", f"repos/{owner_repo}/check-runs/{check_run_id}/jobs"]
-            jobs_result = subprocess.run(jobs_args, capture_output=True, text=True)
+            jobs_result = subprocess.run(jobs_args, capture_output=True, text=True, encoding="utf-8", errors="replace")
             if jobs_result.returncode == 0:
                 jobs_data = json.loads(jobs_result.stdout)
                 for job in jobs_data.get("jobs", []):
@@ -968,7 +971,7 @@ def cmd_logs(argv):
         for job_id in job_ids:
             try:
                 args = _gh_cmd() + ["api", f"repos/{owner_repo}/actions/jobs/{job_id}/logs"]
-                result = subprocess.run(args, capture_output=True, text=True)
+                result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
                 if result.returncode == 0 and result.stdout:
                     if log_content:
                         log_content += "\n" + result.stdout
@@ -1221,4 +1224,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))
