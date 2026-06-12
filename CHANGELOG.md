@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.6
+
+- **monitor --all (Python)** — New sub-command in Python runtime to poll for both CI check status changes and new PR comments in a single loop; output parity with the existing bash implementation.
+
 ## v0.2.5
 
 - **monitor comments** — New sub-command to poll for new review and issue comments on a PR, reporting `type: new-comment` with `count` on change.

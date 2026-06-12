@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "0.2.5"
+VERSION = "0.2.6"
 
 _active_subprocess = None
 
@@ -95,18 +95,27 @@ def gh_api_jq(endpoint, jq_filter):
 def _timed_gh_api_jq(endpoint, jq_filter, timeout_secs=None):
     """Like gh_api_jq but with a subprocess timeout.
 
-    Returns (value, status) where status is "ok", "timeout", or "error".
+    Uses Popen + _active_subprocess so the monitor signal handler can
+    kill the in-flight gh process.  Returns (value, status) where
+    status is "ok", "timeout", or "error".
     """
+    global _active_subprocess
     args = _gh_cmd() + ["api", endpoint, "--jq", jq_filter]
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    _active_subprocess = proc
     try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout_secs
-        )
+        stdout, _ = proc.communicate(timeout=timeout_secs)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         return None, "timeout"
-    if result.returncode != 0:
+    finally:
+        _active_subprocess = None
+    if proc.returncode != 0:
         return None, "error"
-    return result.stdout.strip().replace("\r", ""), "ok"
+    return stdout.strip().replace("\r", ""), "ok"
 
 
 def _setup_git_env():
@@ -196,53 +205,105 @@ def resolve_owner_repo():
 _resolved_owner_repo = None
 
 
-def resolve_pr_number():
+def resolve_pr_number(call_timeout=None):
     global _resolved_owner_repo
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
     owner_repo = resolve_owner_repo()
     head_owner, _ = owner_repo.split("/", 1)
 
-    # On forks, PRs live on the upstream (parent) repo. Detect fork and
-    # use parent for endpoint path + fork owner for head= filter.
-    endpoint_owner_repo = _detect_fork_parent(owner_repo)
+    if call_timeout is not None:
+        pre_detect_mono = time.monotonic()
+        endpoint_owner_repo, det_status = _detect_fork_parent(owner_repo, call_timeout)
+        if det_status == "timeout":
+            return None, "timeout"
+        if det_status != "ok":
+            return None, "error"
+        remaining = call_timeout - (time.monotonic() - pre_detect_mono)
+        if remaining <= 0:
+            return None, "timeout"
+    else:
+        endpoint_owner_repo = _detect_fork_parent(owner_repo)
 
     endpoint_owner, endpoint_repo = endpoint_owner_repo.split("/", 1)
     endpoint = f"repos/{endpoint_owner}/{endpoint_repo}/pulls?head={head_owner}:{branch}"
-    val, ok = gh_api_jq(endpoint, ".[0].number")
-    if not ok:
-        die(f"failed to look up PR for branch '{branch}'")
+
+    if call_timeout is not None:
+        val, status = _timed_gh_api_jq(endpoint, ".[0].number", remaining)
+        if status == "timeout":
+            return None, "timeout"
+        if status != "ok":
+            return None, "error"
+    else:
+        val, status = _timed_gh_api_jq(endpoint, ".[0].number", None)
+        if status != "ok":
+            die(f"failed to look up PR for branch '{branch}'")
     if not val or val == "null":
+        if call_timeout is not None:
+            return None, "error"
         die(f"no open PR found for branch '{branch}'")
+    if call_timeout is not None:
+        return val, "ok"
     return val
 
 
-def _detect_fork_parent(owner_repo):
+def _detect_fork_parent(owner_repo, call_timeout=None):
     """Detect if owner_repo is a fork and return the parent repo, or the
-    original if not a fork. Caches the result in _resolved_owner_repo."""
+    original if not a fork. Caches the result in _resolved_owner_repo.
+
+    When call_timeout is provided, uses _timed_gh_api_jq and returns
+    (result, status) where status is "ok" or "timeout".
+    When call_timeout is None, returns a plain string (backward compat).
+    """
     global _resolved_owner_repo
-    try:
-        is_fork_val, ok = gh_api_jq(f"repos/{owner_repo}", ".fork")
-        if ok and is_fork_val == "true":
-            parent_val, pok = gh_api_jq(f"repos/{owner_repo}", ".parent.full_name")
-            if pok and parent_val and parent_val != "null":
+    if call_timeout is not None:
+        before_fork = time.monotonic()
+        is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", call_timeout)
+        if status == "timeout":
+            return owner_repo, "timeout"
+        if status == "error":
+            return owner_repo, "error"
+        if is_fork_val == "true":
+            remaining = call_timeout - (time.monotonic() - before_fork)
+            if remaining <= 0:
+                return owner_repo, "timeout"
+            parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", remaining)
+            if pstatus == "timeout":
+                return owner_repo, "timeout"
+            if pstatus == "error":
+                return owner_repo, "error"
+            if parent_val and parent_val != "null":
                 _resolved_owner_repo = parent_val
-                return parent_val
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f"warning: fork detection failed for {owner_repo}: {exc}", file=sys.stderr)
+                return parent_val, "ok"
+        _resolved_owner_repo = owner_repo
+        return owner_repo, "ok"
+    is_fork_val, status = _timed_gh_api_jq(f"repos/{owner_repo}", ".fork", None)
+    if status == "ok" and is_fork_val == "true":
+        parent_val, pstatus = _timed_gh_api_jq(f"repos/{owner_repo}", ".parent.full_name", None)
+        if pstatus == "ok" and parent_val and parent_val != "null":
+            _resolved_owner_repo = parent_val
+            return parent_val
     _resolved_owner_repo = owner_repo
     return owner_repo
 
 
-def get_owner_repo():
+def get_owner_repo(call_timeout=None):
     """Return the resolved owner/repo for API endpoints.
 
     After resolve_pr_number sets _resolved_owner_repo (e.g. to the parent
     repo on forks), this returns that value. Otherwise detects fork and
     caches the parent repo. Falls back to origin if not a fork.
+
+    When call_timeout is provided, returns (result, status) where status
+    is "ok" or "timeout". Otherwise returns a plain string.
     """
     if _resolved_owner_repo is not None:
+        if call_timeout is not None:
+            return _resolved_owner_repo, "ok"
         return _resolved_owner_repo
-    return _detect_fork_parent(resolve_owner_repo())
+    result = _detect_fork_parent(resolve_owner_repo(), call_timeout)
+    if call_timeout is not None:
+        return result
+    return result
 
 
 def validate_since_format(value):
@@ -327,17 +388,12 @@ def resolve_since_timestamp(since_input):
 
 def resolve_pr_head_sha(pr_number, timeout_secs=None):
     owner_repo = get_owner_repo()
-    if timeout_secs is not None:
-        val, status = _timed_gh_api_jq(
-            f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha", timeout_secs
-        )
-        if status == "timeout":
-            return None, "timeout"
-        if status == "error" or not val:
-            return None, "error"
-        return val, "ok"
-    val, ok = gh_api_jq(f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha")
-    if not ok or not val:
+    val, status = _timed_gh_api_jq(
+        f"repos/{owner_repo}/pulls/{pr_number}", ".head.sha", timeout_secs
+    )
+    if status == "timeout":
+        return None, "timeout"
+    if status == "error" or not val:
         return None, "error"
     return val, "ok"
 
@@ -697,6 +753,8 @@ def cmd_monitor(argv):
         cmd_monitor_status(rest)
     elif sub_command == "comments":
         cmd_monitor_comments(rest)
+    elif sub_command == "--all":
+        cmd_monitor_all(rest)
     elif sub_command in ("-h", "--help"):
         usage_monitor()
         sys.exit(0)
@@ -836,6 +894,259 @@ def cmd_monitor_comments(argv):
 
             if interrupted:
                 sys.exit(130)
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+
+
+def cmd_monitor_all(argv):
+    pr_number = ""
+    interval = 30
+    timeout_input = ""
+    timeout_secs = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--pr":
+            if i + 1 >= len(argv):
+                die("missing value for --pr")
+            pr_number = argv[i + 1]
+            i += 2
+        elif arg == "--interval":
+            if i + 1 >= len(argv):
+                die("missing value for --interval")
+            interval = argv[i + 1]
+            i += 2
+            if not re.match(r"^[1-9][0-9]*$", interval):
+                die(
+                    f"invalid --interval value: {interval} (expected a positive integer)"
+                )
+            interval = int(interval)
+        elif arg == "--timeout":
+            if i + 1 >= len(argv):
+                die("missing value for --timeout")
+            timeout_input = argv[i + 1]
+            i += 2
+            timeout_secs = parse_duration(timeout_input)
+        elif arg == "--check":
+            die("unknown option: --check (only valid with monitor status)")
+        elif arg in ("-h", "--help"):
+            usage_monitor_all()
+            sys.exit(0)
+        else:
+            die(f"unknown option: {arg}")
+
+    check_deps()
+
+    interrupted = False
+
+    def _handle_signal(signum, frame):
+        nonlocal interrupted
+        interrupted = True
+        if _active_subprocess is not None:
+            _active_subprocess.kill()
+
+    original_sigint = signal.signal(signal.SIGINT, _handle_signal)
+    original_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+
+    start_mono = time.monotonic()
+
+    if not pr_number:
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        pr_number_result = resolve_pr_number(call_timeout)
+        if call_timeout is not None:
+            pr_number, pr_status = pr_number_result
+            if pr_status == "timeout":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+            if pr_status != "ok":
+                if interrupted:
+                    sys.exit(130)
+                die("failed to resolve PR number")
+        else:
+            pr_number = pr_number_result
+
+    call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+    if call_timeout == "expired":
+        print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+        sys.exit(2)
+    owner_repo_result = get_owner_repo(call_timeout)
+    if call_timeout is not None:
+        owner_repo, repo_status = owner_repo_result
+        if repo_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if repo_status != "ok":
+            if interrupted:
+                sys.exit(130)
+            die("failed to resolve owner/repo")
+    else:
+        owner_repo = owner_repo_result
+
+    try:
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        prev_sha, sha_status = resolve_pr_head_sha(pr_number, call_timeout)
+        if sha_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if sha_status != "ok":
+            if interrupted:
+                sys.exit(130)
+            die(f"failed to resolve head SHA for PR #{pr_number}")
+
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        prev_status_snapshot, snap_status = _capture_check_snapshot(owner_repo, prev_sha, call_timeout)
+        if snap_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if snap_status != "ok":
+            if interrupted:
+                sys.exit(130)
+            die(f"failed to fetch check runs for commit {prev_sha}")
+
+        call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+        if call_timeout == "expired":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+
+        initial_comment_snapshot, snap_status = _capture_comment_id_snapshot(
+            owner_repo, pr_number, call_timeout
+        )
+        if snap_status == "timeout":
+            print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+            sys.exit(2)
+        if snap_status != "ok":
+            if interrupted:
+                sys.exit(130)
+            die(f"failed to fetch comments for PR #{pr_number}")
+
+        while True:
+            if timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            sleep_for = interval
+            if timeout_secs is not None:
+                remaining = timeout_secs - (time.monotonic() - start_mono)
+                if remaining < sleep_for:
+                    sleep_for = max(remaining, 0)
+            try:
+                _interruptible_sleep(sleep_for, lambda: interrupted)
+            except OSError:
+                pass
+
+            if interrupted:
+                pass
+            elif timeout_secs is not None:
+                elapsed = time.monotonic() - start_mono
+                if elapsed >= timeout_secs:
+                    print(
+                        f"monitor timed out after {timeout_input}", file=sys.stderr
+                    )
+                    sys.exit(2)
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_sha, sha_status = resolve_pr_head_sha(pr_number, call_timeout)
+            if sha_status == "timeout":
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+            if sha_status != "ok":
+                if interrupted:
+                    sys.exit(130)
+                die(f"failed to re-resolve head SHA for PR #{pr_number}")
+
+            if cur_sha != prev_sha:
+                print("--- change")
+                print("type: new-commit")
+                print(f"sha: {cur_sha}")
+                if interrupted:
+                    sys.exit(130)
+                sys.exit(0)
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_status_snapshot, snap_status = _capture_check_snapshot(
+                owner_repo, cur_sha, call_timeout
+            )
+            if snap_status == "timeout":
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+            if snap_status != "ok":
+                if interrupted:
+                    sys.exit(130)
+                die("failed to fetch check runs during poll")
+
+            call_timeout = _monitor_call_timeout(timeout_secs, start_mono)
+            if call_timeout == "expired":
+                print(f"monitor timed out after {timeout_input}", file=sys.stderr)
+                sys.exit(2)
+
+            cur_comment_snapshot, snap_status = _capture_comment_id_snapshot(
+                owner_repo, pr_number, call_timeout
+            )
+            if snap_status == "timeout":
+                print(
+                    "gh api call timed out; retrying next poll", file=sys.stderr
+                )
+                if interrupted:
+                    sys.exit(130)
+                continue
+            if snap_status != "ok":
+                if interrupted:
+                    sys.exit(130)
+                die("failed to fetch comments during poll")
+
+            status_changes = _compute_status_diff(
+                prev_status_snapshot, cur_status_snapshot
+            )
+            new_comment_ids = cur_comment_snapshot - initial_comment_snapshot
+
+            if status_changes:
+                print(_format_status_changes(status_changes))
+            if new_comment_ids:
+                print("--- change")
+                print("type: new-comment")
+                print(f"count: {len(new_comment_ids)}")
+            if status_changes or new_comment_ids:
+                if interrupted:
+                    sys.exit(130)
+                sys.exit(0)
+
+            if interrupted:
+                sys.exit(130)
+
+            prev_sha = cur_sha
+            prev_status_snapshot = cur_status_snapshot
     finally:
         signal.signal(signal.SIGINT, original_sigint)
         signal.signal(signal.SIGTERM, original_sigterm)
@@ -1150,11 +1461,12 @@ def usage():
 
 
 def usage_monitor():
-    print("usage: gh-pr-context monitor <sub-command> [options]")
+    print("usage: gh-pr-context monitor <sub-command|--all> [options]")
     print("")
     print("sub-commands:")
     print("  status    Poll for check status changes")
     print("  comments  Poll for new comments")
+    print("  --all     Poll for both status and comment changes")
     print("")
     print("options:")
     print("  -h, --help   Show this message")
@@ -1178,6 +1490,19 @@ def usage_monitor_comments():
     print("usage: gh-pr-context monitor comments [options]")
     print("")
     print("Poll for new top-level review and issue comments.")
+    print("Exits 0 on change, 1 on error, 2 on timeout, 130 on signal.")
+    print("")
+    print("options:")
+    print("  --pr <number>       PR number (auto-detected from branch if omitted)")
+    print("  --interval <secs>   Poll interval in seconds (default: 30)")
+    print("  --timeout <dur>     Maximum time to poll (e.g. 30s, 5m, 1h)")
+    print("  -h, --help          Show this message")
+
+
+def usage_monitor_all():
+    print("usage: gh-pr-context monitor --all [options]")
+    print("")
+    print("Poll for both check status changes and new comments.")
     print("Exits 0 on change, 1 on error, 2 on timeout, 130 on signal.")
     print("")
     print("options:")
