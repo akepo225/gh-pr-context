@@ -234,8 +234,8 @@ def resolve_pr_number(call_timeout=None):
         if status != "ok":
             return None, "error"
     else:
-        val, ok = gh_api_jq(endpoint, ".[0].number")
-        if not ok:
+        val, status = _timed_gh_api_jq(endpoint, ".[0].number", None)
+        if status != "ok":
             die(f"failed to look up PR for branch '{branch}'")
     if not val or val == "null":
         if call_timeout is not None:
